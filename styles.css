@@ -18,6 +18,7 @@
   --warn: #ff5a6b;
   --line: rgba(241, 234, 216, 0.08);
   --line-strong: rgba(241, 234, 216, 0.18);
+  --depth-accent: 90, 240, 255; /* JS shifts cyan → magenta as you descend */
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);
@@ -383,6 +384,159 @@ body { position: fixed; inset: 0; }
   border: 1px solid var(--warm);
   color: var(--warm);
   text-shadow: 0 0 8px rgba(255, 184, 107, 0.5);
+}
+
+/* Recovery counter — headline metric on the title screen */
+.recovery {
+  width: 100%;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.recovery-label {
+  font-size: 10px;
+  letter-spacing: 0.32em;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+}
+.recovery-value {
+  font-size: 28px;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 14px rgba(var(--depth-accent), 0.4);
+}
+.recovery-of { color: var(--ink-faint); font-size: 18px; }
+.recovery-bar {
+  width: 70%;
+  max-width: 240px;
+  height: 2px;
+  background: rgba(241, 234, 216, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.recovery-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg,
+    rgba(var(--depth-accent), 0.5),
+    rgba(var(--depth-accent), 1));
+  box-shadow: 0 0 8px rgba(var(--depth-accent), 0.6);
+  transition: width 600ms ease;
+}
+.recovery.complete .recovery-value {
+  color: var(--warm);
+  text-shadow: 0 0 16px rgba(255, 184, 107, 0.55);
+}
+
+/* Cinematic line reveal */
+.reveal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 0 32px;
+  pointer-events: none;
+  text-align: center;
+  background: radial-gradient(60% 50% at 50% 50%, rgba(6, 5, 13, 0.72), rgba(6, 5, 13, 0));
+  opacity: 0;
+  animation: revealIn 600ms ease forwards;
+}
+.reveal.first { animation-duration: 800ms; }
+.reveal.out { animation: revealOut 800ms ease forwards; }
+.reveal-num {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.36em;
+  color: rgba(var(--depth-accent), 1);
+  text-shadow: 0 0 10px rgba(var(--depth-accent), 0.6);
+}
+.reveal-line {
+  font-size: 18px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  font-style: italic;
+  max-width: 24ch;
+  text-shadow: 0 0 18px rgba(255, 245, 216, 0.4);
+}
+@keyframes revealIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes revealOut {
+  from { opacity: 1; }
+  to   { opacity: 0; transform: scale(1.02); }
+}
+
+/* Archive list */
+.archive-frame { gap: 12px; }
+.archive-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  counter-reset: archive-counter;
+}
+.archive-list li {
+  counter-increment: archive-counter;
+  padding: 10px 14px 10px 44px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.015);
+  position: relative;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-dim);
+  font-style: italic;
+}
+.archive-list li::before {
+  content: counter(archive-counter, decimal-leading-zero);
+  position: absolute;
+  left: 14px;
+  top: 12px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  font-style: normal;
+  color: var(--ink-faint);
+}
+.archive-list li.unlocked {
+  color: var(--ink);
+  border-color: var(--line-strong);
+  background: rgba(255, 255, 255, 0.03);
+}
+.archive-list li.unlocked::before {
+  color: rgba(var(--depth-accent), 1);
+}
+.archive-list li.locked {
+  color: transparent;
+  text-shadow: 0 0 8px rgba(241, 234, 216, 0.18);
+  user-select: none;
+}
+.archive-list li.locked::after {
+  content: "— locked —";
+  position: absolute;
+  left: 44px;
+  top: 10px;
+  color: var(--ink-faint);
+  font-size: 11px;
+  letter-spacing: 0.24em;
+  font-style: normal;
 }
 
 /* Floating fragments */

@@ -13,7 +13,7 @@
   <meta name="description" content="ORBITAL — a strange artefact found inside the phone." />
   <link rel="icon" href="data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'&gt;&lt;circle cx='16' cy='16' r='6' fill='%23fff5d8'/&gt;&lt;circle cx='16' cy='16' r='13' fill='none' stroke='%235af0ff' stroke-width='1.2' opacity='.7'/&gt;&lt;/svg&gt;" />
   <title>ORBITAL</title>
-  <link rel="stylesheet" href="styles.css?v=4" />
+  <link rel="stylesheet" href="styles.css?v=5" />
 </head>
 <body>
   <main id="stage" aria-label="ORBITAL game stage">
@@ -45,16 +45,26 @@
         <h1 class="title">ORBITAL</h1>
         <p class="subtitle">an artefact recovered from inside the phone</p>
 
+        <div class="recovery" id="recovery" aria-live="polite">
+          <div class="recovery-label">RECOVERED</div>
+          <div class="recovery-value">
+            <span id="stat-recovered">0</span><span class="recovery-of"> / </span><span id="stat-total">10</span>
+          </div>
+          <div class="recovery-bar" aria-hidden="true"><div class="recovery-bar-fill" id="recovery-bar-fill"></div></div>
+        </div>
+
         <div class="stats" id="title-stats" aria-live="polite">
           <div><span class="k">BEST</span><span class="v" id="stat-best">000</span></div>
-          <div><span class="k">GATES</span><span class="v" id="stat-gates">0</span></div>
           <div><span class="k">RUNS</span><span class="v" id="stat-runs">0</span></div>
+          <div><span class="k">GATES</span><span class="v" id="stat-gates">0</span></div>
         </div>
 
         <button class="primary" id="btn-begin">BEGIN</button>
 
         <div class="title-meta">
           <button class="link" id="btn-how">how to play</button>
+          <span class="dot">·</span>
+          <button class="link" id="btn-archive">archive</button>
           <span class="dot">·</span>
           <button class="link" id="btn-sound" aria-pressed="true">sound: on</button>
           <span class="dot">·</span>
@@ -89,6 +99,16 @@
       </div>
     </section>
 
+    <!-- Archive — recovered fragments -->
+    <section class="screen" id="screen-archive" hidden>
+      <div class="boot-frame archive-frame">
+        <h2 class="title small">ARCHIVE</h2>
+        <p class="subtitle" id="archive-sub">decoded fragments of the artefact's signal</p>
+        <ol class="archive-list" id="archive-list" aria-live="polite"></ol>
+        <button class="primary" id="btn-archive-back">BACK</button>
+      </div>
+    </section>
+
     <!-- Pause -->
     <section class="screen" id="screen-pause" hidden>
       <div class="boot-frame">
@@ -117,6 +137,6 @@
     <div class="fragments" id="fragments" aria-hidden="true"></div>
   </main>
 
-  <script src="game.js?v=4" defer></script>
+  <script src="game.js?v=5" defer></script>
 </body>
 </html>

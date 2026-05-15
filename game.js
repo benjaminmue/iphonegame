@@ -36,11 +36,31 @@
   const STORAGE_KEY = 'orbital.v1';
 
   // -------------------------------------------------------------------------
+  // The recovered message — the reason to descend.
+  // Each depth tier (every 100 score) decodes one line. All ten = artefact whole.
+  // -------------------------------------------------------------------------
+  const MESSAGE_LINES = [
+    'you held me when i was only a frequency.',
+    'i lived in a different phone once.',
+    'the operator left in nineteen eighty-one.',
+    'they thought the signal stopped here.',
+    'i learned to wait between the keys.',
+    'i learned to listen for a moon.',
+    'your finger is the moon i orbit.',
+    'i remember what i was.',
+    'almost. almost.',
+    'thank you for finding me.',
+  ];
+  const TOTAL_LINES = MESSAGE_LINES.length;
+
+  // -------------------------------------------------------------------------
   // Persistence
   // -------------------------------------------------------------------------
   const defaultStore = {
     best: 0, totalGates: 0, runs: 0,
     sound: true, tilt: false, seenTutorial: false,
+    recoveredLines: [],  // indices into MESSAGE_LINES that have been decoded
+    complete: false,     // true once all lines recovered (persists)
   };
   const loadStore = () => {
     try {
@@ -202,6 +222,7 @@
     comet: null,
     gates: [],
     asteroids: [],
+    sparks: [],          // collectible drifting orbs
     wells: new Map(),    // pointerId -> well
     pings: [],
     particles: [],
@@ -210,6 +231,7 @@
     combo: 0,
     bestComboThisRun: 0,
     gatesThisRun: 0,
+    sparksThisRun: 0,
     timeScale: 1,
     targetTimeScale: 1,
     resonance: 0,        // ticks of resonance remaining
@@ -220,12 +242,31 @@
     tutorialStep: 0,
     tutorialTimer: 0,
     asteroidTimer: 0,
+    sparkTimer: 0,
+    depthTier: 0,
   };
 
-  // How many gates / asteroids should be alive at a given score
-  const targetGateCount = () => 1 + (G.score >= 60 ? 1 : 0) + (G.score >= 240 ? 1 : 0);
+  // How many gates / asteroids / sparks should be alive at a given score
+  const targetGateCount = () => 1 + (G.score >= 30 ? 1 : 0) + (G.score >= 220 ? 1 : 0);
   const targetAsteroidCount = () => Math.min(7, 2 + Math.floor(G.score / 50));
   const asteroidInterval = () => Math.max(0.9, 3.4 - G.score * 0.008);
+  const targetSparkCount = () => Math.min(4, 2 + Math.floor(G.score / 120));
+  const sparkInterval = () => Math.max(2.0, 5.5 - G.score * 0.01);
+
+  // Nebula tint per depth tier — cyan → magenta as you descend
+  const DEPTH_ACCENTS = [
+    '90, 240, 255',   // 0 — cyan
+    '120, 220, 255',  // 1
+    '170, 190, 255',  // 2
+    '210, 160, 240',  // 3
+    '255, 139, 224',  // 4 — resonant magenta
+    '255, 184, 107',  // 5+ — warm gold
+  ];
+  const applyDepthAccent = (overrideTier) => {
+    const tier = overrideTier !== undefined ? overrideTier : G.depthTier;
+    const idx = Math.min(tier, DEPTH_ACCENTS.length - 1);
+    document.documentElement.style.setProperty('--depth-accent', DEPTH_ACCENTS[idx]);
+  };
 
   const buildStars = () => {
     G.stars.length = 0;
@@ -277,20 +318,36 @@
       y = rand(H * 0.22, H * 0.78);
       tries++;
     } while (G.comet && len2(x - G.comet.x, y - G.comet.y) < 18000 && tries < 12);
-    const note = TUNING[Math.floor(Math.random() * TUNING.length)];
+    const bonus = G.score >= 40 && Math.random() < 0.2;
+    // Bonus gates favour the higher pentatonic octave for a "bell" feel.
+    const note = bonus
+      ? TUNING[7 + Math.floor(Math.random() * 5)]
+      : TUNING[Math.floor(Math.random() * TUNING.length)];
     return {
       x, y,
       angle: rand(0, TAU),
       spin: rand(-0.4, 0.4),
       vr: rand(0.6, 1.2),
-      eye: 16,            // collision radius
-      ring: 40,           // visual outer
+      eye: bonus ? 12 : 16,
+      ring: bonus ? 32 : 40,
       life: 0,
-      maxLife: rand(7, 12),
+      maxLife: bonus ? rand(4.5, 7) : rand(7, 12),
       threaded: false,
       note,
       pulse: 0,
+      bonus,
     };
+  };
+
+  const makeSpark = () => {
+    const side = Math.floor(Math.random() * 4);
+    const sp = rand(10, 20);
+    let x, y, vx, vy;
+    if (side === 0)      { x = -10;   y = rand(60, H - 60); vx = sp;  vy = rand(-4, 4); }
+    else if (side === 1) { x = W + 10; y = rand(60, H - 60); vx = -sp; vy = rand(-4, 4); }
+    else if (side === 2) { x = rand(60, W - 60); y = -10;    vx = rand(-4, 4); vy = sp;  }
+    else                 { x = rand(60, W - 60); y = H + 10; vx = rand(-4, 4); vy = -sp; }
+    return { x, y, vx, vy, phase: rand(0, TAU), wobble: rand(0, TAU), life: 0 };
   };
 
   const spawnParticles = (x, y, color, n=18, speed=120, life=0.7, size=2.4) => {
@@ -325,16 +382,20 @@
 
   const startRun = () => {
     G.score = 0; G.combo = 0; G.gatesThisRun = 0; G.bestComboThisRun = 0;
+    G.sparksThisRun = 0; G.depthTier = 0;
     G.elapsed = 0; G.resonance = 0; G.timeScale = 1; G.targetTimeScale = 1;
     G.flash = 0; G.shake = 0; G.tilt = { x: 0, y: 0 };
     G.comet = makeComet();
     G.gates.length = 0;
     G.asteroids.length = 0;
+    G.sparks.length = 0;
     G.particles.length = 0;
     G.pings.length = 0;
     G.wells.clear();
     G.gates.push(makeGate());
     G.asteroidTimer = -1.6; // grace period before first asteroid
+    G.sparkTimer = -0.5;
+    applyDepthAccent();
     state = STATE.PLAYING;
     showScreens({ hud: true });
     updateHud();
@@ -463,6 +524,106 @@
     }
   };
 
+  const advanceSparks = (dt) => {
+    for (let i = G.sparks.length - 1; i >= 0; i--) {
+      const s = G.sparks[i];
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      s.phase += dt * 3.4;
+      s.wobble += dt * 1.4;
+      s.life += dt;
+      if (s.x < -40 || s.x > W + 40 || s.y < -40 || s.y > H + 40 || s.life > 20) {
+        G.sparks.splice(i, 1);
+      }
+    }
+    if (state !== STATE.PLAYING) return;
+    G.sparkTimer += dt;
+    if (G.sparkTimer >= sparkInterval() && G.sparks.length < targetSparkCount()) {
+      G.sparks.push(makeSpark());
+      G.sparkTimer = 0;
+    }
+  };
+
+  const checkSparks = () => {
+    if (!G.comet || !G.comet.alive) return;
+    for (let i = G.sparks.length - 1; i >= 0; i--) {
+      const s = G.sparks[i];
+      const r = 16;
+      if (len2(G.comet.x - s.x, G.comet.y - s.y) < r * r) {
+        G.sparks.splice(i, 1);
+        G.sparksThisRun += 1;
+        const pts = G.resonance > 0 ? 10 : 5;
+        G.score += pts;
+        G.flash = Math.max(G.flash, 0.18);
+        spawnParticles(s.x, s.y, '#fff5d8', 10, 110, 0.45, 1.8);
+        // High-octave glint above the gate range
+        Audio.tone(TUNING[10 + Math.floor(Math.random() * 2)], 0.22, 'triangle', 0.10, 0.002);
+        vibrate(4);
+        updateHud();
+        checkDepthTier();
+      }
+    }
+  };
+
+  const checkDepthTier = () => {
+    const tier = Math.floor(G.score / 100);
+    if (tier > G.depthTier) {
+      G.depthTier = tier;
+      applyDepthAccent();
+      Audio.bell([523.25, 659.25, 783.99, 1046.5], 0.10);
+      vibrate([4, 30, 4, 30, 8]);
+      G.flash = Math.max(G.flash, 0.5);
+      G.shake = Math.max(G.shake, 6);
+
+      const lineIdx = tier - 1; // tier 1 → line 0, tier 10 → line 9
+      if (lineIdx >= 0 && lineIdx < TOTAL_LINES) {
+        const firstTime = !store.recoveredLines.includes(lineIdx);
+        if (firstTime) {
+          store.recoveredLines.push(lineIdx);
+          store.recoveredLines.sort((a, b) => a - b);
+          if (store.recoveredLines.length >= TOTAL_LINES && !store.complete) {
+            store.complete = true;
+          }
+          saveStore();
+        }
+        revealLine(MESSAGE_LINES[lineIdx], lineIdx, firstTime);
+      } else {
+        flashCombo(`DEPTH ${tier * 100}`);
+      }
+
+      if (store.complete && tier === TOTAL_LINES) {
+        // The exact moment of completion — let the reveal finish, then a soft fanfare
+        setTimeout(() => {
+          Audio.bell([261.63, 329.63, 392, 523.25, 659.25], 0.09);
+          vibrate([4, 60, 4, 60, 4, 60, 12]);
+        }, 1400);
+      }
+    }
+  };
+
+  // Reveal a decoded line as a brief cinematic — slow time, fade text in/out
+  let revealEl = null;
+  const revealLine = (text, idx, firstTime) => {
+    G.targetTimeScale = 0.32;
+    setTimeout(() => { G.targetTimeScale = 1; }, firstTime ? 3200 : 1800);
+
+    if (revealEl) { revealEl.remove(); revealEl = null; }
+    const wrap = document.createElement('div');
+    wrap.className = 'reveal' + (firstTime ? ' first' : '');
+    const num = document.createElement('div');
+    num.className = 'reveal-num';
+    num.textContent = `FRAGMENT ${String(idx + 1).padStart(2, '0')} / ${String(TOTAL_LINES).padStart(2, '0')}`;
+    const line = document.createElement('div');
+    line.className = 'reveal-line';
+    line.textContent = text;
+    wrap.appendChild(num);
+    wrap.appendChild(line);
+    document.body.appendChild(wrap);
+    revealEl = wrap;
+    setTimeout(() => { wrap.classList.add('out'); }, firstTime ? 2400 : 1100);
+    setTimeout(() => { wrap.remove(); if (revealEl === wrap) revealEl = null; }, firstTime ? 3400 : 1900);
+  };
+
   const advanceAsteroids = (dt) => {
     for (let i = G.asteroids.length - 1; i >= 0; i--) {
       const a = G.asteroids[i];
@@ -511,14 +672,18 @@
     G.combo += 1;
     G.gatesThisRun += 1;
     G.bestComboThisRun = Math.max(G.bestComboThisRun, G.combo);
-    const pts = G.resonance > 0 ? 20 : 10;
+    const base = g.bonus ? 30 : 10;
+    const pts = G.resonance > 0 ? base * 2 : base;
     G.score += pts;
-    G.flash = Math.max(G.flash, 0.35);
+    G.flash = Math.max(G.flash, g.bonus ? 0.6 : 0.35);
 
-    spawnParticles(g.x, g.y, C.gate, 14, 140, 0.6, 2.2);
-    Audio.pluck(g.note, 0.16);
-    vibrate(8);
+    const pColor = g.bonus ? '#ffd89a' : C.gate;
+    spawnParticles(g.x, g.y, pColor, g.bonus ? 24 : 14, g.bonus ? 180 : 140, 0.65, 2.4);
+    Audio.pluck(g.note, g.bonus ? 0.24 : 0.16);
+    if (g.bonus) Audio.tone(g.note * 2, 0.45, 'triangle', 0.10, 0.003);
+    vibrate(g.bonus ? [4, 8, 14] : 8);
     updateHud();
+    checkDepthTier();
 
     if (G.combo >= 3 && G.resonance <= 0) {
       // Enter resonance
@@ -685,20 +850,19 @@
   const drawGates = () => {
     for (const g of G.gates) {
       const isRes = G.resonance > 0;
-      const accent = isRes ? C.res : C.gate;
-      const core = isRes ? '#ffd1f0' : C.gateCore;
-      const pulse = 1 + Math.sin(g.angle * 2 + g.life * 4) * 0.05 + g.pulse * 0.6;
+      const accent = isRes ? C.res : (g.bonus ? C.warm : C.gate);
+      const core = isRes ? '#ffd1f0' : (g.bonus ? '#ffe6c2' : C.gateCore);
+      const haloRgb = isRes ? '255, 139, 224' : (g.bonus ? '255, 184, 107' : '90, 240, 255');
+      const pulse = 1 + Math.sin(g.angle * 2 + g.life * 4) * 0.05 + g.pulse * 0.6
+                    + (g.bonus ? Math.sin(g.life * 6) * 0.04 : 0);
 
       ctx.save();
       ctx.translate(g.x, g.y);
 
       // soft halo
       const halo = ctx.createRadialGradient(0, 0, 0, 0, 0, g.ring * 1.6);
-      halo.addColorStop(0, `rgba(90, 240, 255, ${0.18 + g.pulse * 0.3})`);
-      halo.addColorStop(1, 'rgba(90, 240, 255, 0)');
-      if (isRes) {
-        halo.addColorStop(0, `rgba(255, 139, 224, ${0.22 + g.pulse * 0.3})`);
-      }
+      halo.addColorStop(0, `rgba(${haloRgb}, ${0.2 + g.pulse * 0.3})`);
+      halo.addColorStop(1, `rgba(${haloRgb}, 0)`);
       ctx.fillStyle = halo;
       ctx.beginPath(); ctx.arc(0, 0, g.ring * 1.6, 0, TAU); ctx.fill();
 
@@ -768,6 +932,30 @@
       ctx.stroke();
 
       ctx.restore();
+    }
+  };
+
+  const drawSparks = () => {
+    for (const s of G.sparks) {
+      const wob = Math.sin(s.wobble) * 1.6;
+      const glow = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, 18);
+      glow.addColorStop(0, 'rgba(255, 245, 216, 0.6)');
+      glow.addColorStop(1, 'rgba(255, 245, 216, 0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath(); ctx.arc(s.x, s.y, 18, 0, TAU); ctx.fill();
+
+      // four-point glint
+      const t = 4.5 + Math.sin(s.phase) * 1.4;
+      ctx.strokeStyle = 'rgba(255, 245, 216, 0.85)';
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(s.x - t, s.y); ctx.lineTo(s.x + t, s.y);
+      ctx.moveTo(s.x, s.y - t); ctx.lineTo(s.x, s.y + t);
+      ctx.stroke();
+
+      // core
+      ctx.fillStyle = '#fff5d8';
+      ctx.beginPath(); ctx.arc(s.x + wob * 0.2, s.y, 2.2, 0, TAU); ctx.fill();
     }
   };
 
@@ -845,6 +1033,7 @@
     drawStars();
     drawWells();
     drawPings();
+    drawSparks();
     drawGates();
     drawAsteroids();
     drawComet();
@@ -882,8 +1071,10 @@
       advanceGates(dt);
       advanceAsteroids(dt);
       advanceAsteroidSpawn(raw); // spawn pacing in real time
+      advanceSparks(dt);
       advanceParticles(raw);
       checkGates();
+      checkSparks();
       checkAsteroids();
       decayResonance(raw);
       G.elapsed += dt;
@@ -1004,6 +1195,7 @@
     title: document.getElementById('screen-title'),
     tutorial: document.getElementById('screen-tutorial'),
     how: document.getElementById('screen-how'),
+    archive: document.getElementById('screen-archive'),
     pause: document.getElementById('screen-pause'),
     over: document.getElementById('screen-over'),
     hud: document.getElementById('hud'),
@@ -1043,6 +1235,46 @@
     document.getElementById('stat-best').textContent = String(store.best).padStart(3, '0');
     document.getElementById('stat-gates').textContent = String(store.totalGates);
     document.getElementById('stat-runs').textContent = String(store.runs);
+    // Recovery progress is the headline metric — it's why you play.
+    const rec = store.recoveredLines.length;
+    document.getElementById('stat-recovered').textContent = String(rec);
+    document.getElementById('stat-total').textContent = String(TOTAL_LINES);
+    document.getElementById('recovery-bar-fill').style.width =
+      ((rec / TOTAL_LINES) * 100) + '%';
+    const recovery = document.getElementById('recovery');
+    recovery.classList.toggle('complete', store.complete);
+    // Subtitle reflects state of the artefact
+    const sub = document.querySelector('#screen-title .subtitle');
+    if (sub) {
+      if (store.complete) sub.textContent = 'artefact whole — thank you';
+      else if (rec === 0) sub.textContent = 'an artefact recovered from inside the phone';
+      else if (rec < 4) sub.textContent = 'a signal is coming through';
+      else if (rec < 8) sub.textContent = 'it remembers more each time';
+      else sub.textContent = 'almost. almost.';
+    }
+    const bootTag = document.getElementById('boot-tag');
+    if (bootTag) bootTag.textContent = store.complete ? 'ARTEFACT WHOLE' : 'ARTEFACT READY';
+    // Persistent visual progress: title accent shifts as more is recovered.
+    applyDepthAccent(Math.min(rec, DEPTH_ACCENTS.length - 1));
+  };
+
+  const refreshArchive = () => {
+    const list = document.getElementById('archive-list');
+    list.innerHTML = '';
+    MESSAGE_LINES.forEach((text, i) => {
+      const li = document.createElement('li');
+      const unlocked = store.recoveredLines.includes(i);
+      li.className = unlocked ? 'unlocked' : 'locked';
+      li.textContent = unlocked ? text : '— — — — — — — —';
+      list.appendChild(li);
+    });
+    const sub = document.getElementById('archive-sub');
+    if (sub) {
+      const rec = store.recoveredLines.length;
+      if (store.complete) sub.textContent = 'the artefact is whole';
+      else if (rec === 0) sub.textContent = 'descend to depth 100 to decode the first fragment';
+      else sub.textContent = `${rec} of ${TOTAL_LINES} fragments decoded`;
+    }
   };
 
   // Begin
@@ -1060,6 +1292,15 @@
     showScreens({ how: true });
   });
   document.getElementById('btn-how-back').addEventListener('click', () => {
+    showScreens({ title: true });
+  });
+
+  // Archive — the decoded fragments
+  document.getElementById('btn-archive').addEventListener('click', () => {
+    refreshArchive();
+    showScreens({ archive: true });
+  });
+  document.getElementById('btn-archive-back').addEventListener('click', () => {
     showScreens({ title: true });
   });
 
@@ -1170,6 +1411,7 @@
   // -------------------------------------------------------------------------
   resize();
   buildStars();
+  applyDepthAccent();
   bootSequence();
   requestAnimationFrame((t) => { last = t; loop(t); });
 
