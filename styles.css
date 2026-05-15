@@ -201,31 +201,35 @@ body { position: fixed; inset: 0; }
 .boot-dot.pulse { animation: blink 0.8s ease-in-out infinite; }
 
 .title {
-  font-size: clamp(36px, 11.5vw, 60px);
-  letter-spacing: 0.18em;
+  font-size: clamp(28px, 8.8vw, 50px);
+  letter-spacing: 0.14em;
   font-weight: 200;
   margin: 0;
-  padding-left: 0.18em; /* visually centre when trailing letter-spacing is added */
+  padding-left: 0.14em; /* visually centre when trailing letter-spacing is added */
   color: var(--ink);
   text-align: center;
+  max-width: 100%;
+  word-break: keep-all;
+  overflow-wrap: normal;
   text-shadow:
     0 0 18px rgba(90, 240, 255, 0.18),
     0 0 60px rgba(90, 240, 255, 0.08);
 }
 .title.small {
-  font-size: clamp(18px, 5.4vw, 24px);
-  letter-spacing: 0.28em;
-  padding-left: 0.28em;
+  font-size: clamp(16px, 4.6vw, 22px);
+  letter-spacing: 0.22em;
+  padding-left: 0.22em;
 }
 
 .subtitle {
   margin: -4px 0 8px;
-  font-size: 11px;
-  letter-spacing: 0.14em;
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
   color: var(--ink-faint);
   text-transform: lowercase;
   font-style: italic;
   max-width: 100%;
+  line-height: 1.4;
 }
 
 .stats {
@@ -431,9 +435,9 @@ body { position: fixed; inset: 0; }
 
 /* Larger phones: a touch more breathing room */
 @media (min-height: 800px) {
-  .title { font-size: 64px; }
+  .title { font-size: 52px; }
 }
 /* Narrow devices: avoid the title nudging the layout */
 @media (max-width: 360px) {
-  .title { font-size: 34px; letter-spacing: 0.14em; padding-left: 0.14em; }
+  .title { font-size: 28px; letter-spacing: 0.1em; padding-left: 0.1em; }
 }
