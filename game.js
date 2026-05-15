@@ -219,7 +219,13 @@
     tilt: { x: 0, y: 0 },
     tutorialStep: 0,
     tutorialTimer: 0,
+    asteroidTimer: 0,
   };
+
+  // How many gates / asteroids should be alive at a given score
+  const targetGateCount = () => 1 + (G.score >= 60 ? 1 : 0) + (G.score >= 240 ? 1 : 0);
+  const targetAsteroidCount = () => Math.min(7, 2 + Math.floor(G.score / 50));
+  const asteroidInterval = () => Math.max(0.9, 3.4 - G.score * 0.008);
 
   const buildStars = () => {
     G.stars.length = 0;
@@ -328,7 +334,7 @@
     G.pings.length = 0;
     G.wells.clear();
     G.gates.push(makeGate());
-    setTimeout(() => G.asteroids.push(makeAsteroid()), 800);
+    G.asteroidTimer = -1.6; // grace period before first asteroid
     state = STATE.PLAYING;
     showScreens({ hud: true });
     updateHud();
@@ -438,9 +444,22 @@
       g.life += dt;
       g.pulse = Math.max(0, g.pulse - dt * 3.5);
       if (g.life > g.maxLife && !g.threaded) {
-        // fade out and respawn elsewhere
         G.gates.splice(i, 1);
       }
+    }
+    // Keep the screen populated with goals at all times
+    if (state === STATE.PLAYING) {
+      while (G.gates.length < targetGateCount()) G.gates.push(makeGate());
+    }
+  };
+
+  const advanceAsteroidSpawn = (dt) => {
+    if (state !== STATE.PLAYING) return;
+    G.asteroidTimer += dt;
+    if (G.asteroidTimer >= asteroidInterval() &&
+        G.asteroids.length < targetAsteroidCount()) {
+      G.asteroids.push(makeAsteroid());
+      G.asteroidTimer = 0;
     }
   };
 
@@ -512,12 +531,9 @@
       flashCombo(`×${G.combo}`);
     }
 
-    // Spawn replacement gate, escalate difficulty
-    G.gates.push(makeGate());
-    if (G.gates.length > 2 && Math.random() < 0.15) G.gates.push(makeGate());
-
-    // Occasionally tighten the field with another asteroid
-    if (G.asteroids.length < 2 + Math.floor(G.score / 60) && Math.random() < 0.85) {
+    // advanceGates will replenish to target count next frame; nothing
+    // to do here. Occasionally seed a fresh asteroid for extra pressure.
+    if (G.asteroids.length < targetAsteroidCount() && Math.random() < 0.6) {
       G.asteroids.push(makeAsteroid());
     }
   };
@@ -865,6 +881,7 @@
       advancePings(raw); // pings live in real time
       advanceGates(dt);
       advanceAsteroids(dt);
+      advanceAsteroidSpawn(raw); // spawn pacing in real time
       advanceParticles(raw);
       checkGates();
       checkAsteroids();
