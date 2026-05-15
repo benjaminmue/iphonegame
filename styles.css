@@ -2,6 +2,9 @@
 
 * { box-sizing: border-box; }
 
+/* The `hidden` HTML attribute must beat .hud / .screen display rules. */
+[hidden] { display: none !important; }
+
 :root {
   --bg-0: #06050d;
   --bg-1: #0c0a1a;
@@ -164,13 +167,16 @@ body { position: fixed; inset: 0; }
 .screen[hidden] { display: none; }
 
 .boot-frame {
-  width: min(420px, 100%);
+  width: 100%;
+  max-width: 420px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 18px;
   text-align: center;
 }
+.boot-frame > * { max-width: 100%; }
 
 .boot-stamp {
   display: inline-flex;
@@ -195,28 +201,31 @@ body { position: fixed; inset: 0; }
 .boot-dot.pulse { animation: blink 0.8s ease-in-out infinite; }
 
 .title {
-  font-size: clamp(46px, 14vw, 72px);
-  letter-spacing: 0.32em;
+  font-size: clamp(36px, 11.5vw, 60px);
+  letter-spacing: 0.18em;
   font-weight: 200;
   margin: 0;
-  padding-left: 0.32em;
+  padding-left: 0.18em; /* visually centre when trailing letter-spacing is added */
   color: var(--ink);
+  text-align: center;
   text-shadow:
     0 0 18px rgba(90, 240, 255, 0.18),
     0 0 60px rgba(90, 240, 255, 0.08);
 }
 .title.small {
-  font-size: clamp(20px, 6vw, 28px);
-  letter-spacing: 0.4em;
+  font-size: clamp(18px, 5.4vw, 24px);
+  letter-spacing: 0.28em;
+  padding-left: 0.28em;
 }
 
 .subtitle {
   margin: -4px 0 8px;
-  font-size: 12px;
-  letter-spacing: 0.24em;
+  font-size: 11px;
+  letter-spacing: 0.14em;
   color: var(--ink-faint);
   text-transform: lowercase;
   font-style: italic;
+  max-width: 100%;
 }
 
 .stats {
@@ -422,5 +431,9 @@ body { position: fixed; inset: 0; }
 
 /* Larger phones: a touch more breathing room */
 @media (min-height: 800px) {
-  .title { font-size: 78px; }
+  .title { font-size: 64px; }
+}
+/* Narrow devices: avoid the title nudging the layout */
+@media (max-width: 360px) {
+  .title { font-size: 34px; letter-spacing: 0.14em; padding-left: 0.14em; }
 }

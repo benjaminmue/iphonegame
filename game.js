@@ -366,11 +366,14 @@
   // -------------------------------------------------------------------------
   // Physics & spawning
   // -------------------------------------------------------------------------
-  const G_FORCE = 5200;       // base pull magnitude
-  const G_SOFT = 32;          // soft minimum distance for force calc
+  // Tuning: 1/r falloff (not 1/r²) so the pull stays useful at distance.
+  const G_FORCE = 22000;      // pull magnitude — scales with 1/r
+  const G_SOFT = 14;           // softening near singularity
+  const PING_FORCE = 36000;   // push pulse magnitude
+  const PING_SOFT = 22;
   const COMET_R = 5;
-  const MAX_SPEED = 520;
-  const DRAG = 0.985;
+  const MAX_SPEED = 760;
+  const DRAG = 0.994;          // per-frame damping (≈0.70 per sec at 60fps)
 
   const applyForces = (dt) => {
     if (!G.comet || !G.comet.alive) return;
@@ -379,22 +382,21 @@
     G.wells.forEach((w) => {
       const dx = w.x - G.comet.x;
       const dy = w.y - G.comet.y;
-      const d2 = dx * dx + dy * dy + G_SOFT * G_SOFT;
-      const inv = 1 / Math.sqrt(d2);
-      const f = G_FORCE / d2;
-      ax += dx * inv * f;
-      ay += dy * inv * f;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      if (r < 0.001) return;
+      const accel = G_FORCE / (r + G_SOFT);
+      ax += (dx / r) * accel;
+      ay += (dy / r) * accel;
     });
 
     G.pings.forEach((p) => {
       const dx = G.comet.x - p.x;
       const dy = G.comet.y - p.y;
-      const d2 = dx * dx + dy * dy + 200;
-      const inv = 1 / Math.sqrt(d2);
-      const strength = 12000 * p.life;
-      const f = strength / d2;
-      ax += dx * inv * f;
-      ay += dy * inv * f;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      if (r < 0.001) return;
+      const accel = (PING_FORCE * p.life) / (r + PING_SOFT);
+      ax += (dx / r) * accel;
+      ay += (dy / r) * accel;
     });
 
     G.comet.vx = (G.comet.vx + ax * dt) * DRAG;
@@ -570,7 +572,7 @@
         }
       }
     } else if (G.tutorialStep === 1) {
-      if (len2(G.comet.x - TUT_TARGET.x, G.comet.y - TUT_TARGET.y) < 36 * 36) {
+      if (len2(G.comet.x - TUT_TARGET.x, G.comet.y - TUT_TARGET.y) < 52 * 52) {
         TUT_TARGET.active = false;
         G.tutorialStep = 2;
         G.tutorialTimer = 0;
@@ -869,7 +871,7 @@
       decayResonance(raw);
       G.elapsed += dt;
     } else if (state === STATE.TUTORIAL) {
-      applyForces(dt * 0.85);
+      applyForces(dt);
       advancePings(raw);
       advanceParticles(raw);
       advanceTutorial(raw);
