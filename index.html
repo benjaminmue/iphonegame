@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no, maximum-scale=1" />
+  <meta name="theme-color" content="#06050d" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="ORBITAL" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="format-detection" content="telephone=no" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="description" content="ORBITAL — a strange artefact found inside the phone." />
+  <link rel="icon" href="data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'&gt;&lt;circle cx='16' cy='16' r='6' fill='%23fff5d8'/&gt;&lt;circle cx='16' cy='16' r='13' fill='none' stroke='%235af0ff' stroke-width='1.2' opacity='.7'/&gt;&lt;/svg&gt;" />
+  <title>ORBITAL</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main id="stage" aria-label="ORBITAL game stage">
+    <canvas id="canvas" aria-hidden="true"></canvas>
+
+    <!-- HUD shown only during play -->
+    <header id="hud" class="hud" hidden>
+      <div class="hud-cluster left">
+        <div class="hud-label">DEPTH</div>
+        <div class="hud-value" id="hud-score">000</div>
+      </div>
+      <div class="hud-cluster center">
+        <div class="hud-combo" id="hud-combo"></div>
+      </div>
+      <div class="hud-cluster right">
+        <button class="hud-btn" id="btn-pause" aria-label="Pause">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="6" width="3.6" height="12" rx="1"/><rect x="13.4" y="6" width="3.6" height="12" rx="1"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Boot / Title -->
+    <section class="screen" id="screen-title">
+      <div class="boot-frame">
+        <div class="boot-stamp">
+          <span class="boot-dot"></span>
+          <span class="boot-tag" id="boot-tag">CALIBRATING</span>
+        </div>
+        <h1 class="title">ORBITAL</h1>
+        <p class="subtitle">an artefact recovered from inside the phone</p>
+
+        <div class="stats" id="title-stats" aria-live="polite">
+          <div><span class="k">BEST</span><span class="v" id="stat-best">000</span></div>
+          <div><span class="k">GATES</span><span class="v" id="stat-gates">0</span></div>
+          <div><span class="k">RUNS</span><span class="v" id="stat-runs">0</span></div>
+        </div>
+
+        <button class="primary" id="btn-begin">BEGIN</button>
+
+        <div class="title-meta">
+          <button class="link" id="btn-how">how to play</button>
+          <span class="dot">·</span>
+          <button class="link" id="btn-sound" aria-pressed="true">sound: on</button>
+          <span class="dot">·</span>
+          <button class="link" id="btn-motion" aria-pressed="false">tilt: off</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tutorial overlay (lives inside the game canvas) -->
+    <section class="screen subtle" id="screen-tutorial" hidden>
+      <div class="tut-card">
+        <div class="tut-step" id="tut-step">touch and hold</div>
+        <div class="tut-hint" id="tut-hint">your finger is a gravity well — pull the comet toward you</div>
+      </div>
+      <button class="link tut-skip" id="btn-tut-skip">skip onboarding</button>
+    </section>
+
+    <!-- How to play -->
+    <section class="screen" id="screen-how" hidden>
+      <div class="boot-frame">
+        <h2 class="title small">HOW TO PLAY</h2>
+        <ul class="howto">
+          <li><b>Pull</b> — touch and hold; gravity follows your finger.</li>
+          <li><b>Push</b> — quick tap to nudge the comet away.</li>
+          <li><b>Thread</b> — pass the comet through glowing gates.</li>
+          <li><b>Avoid</b> — asteroids end the run on contact.</li>
+          <li><b>Resonance</b> — three gates in a row enters slow time, double points.</li>
+          <li><b>Two thumbs</b> — multi-touch creates multiple wells. Try it.</li>
+        </ul>
+        <p class="quiet">A pentatonic tone plays for every gate you thread. A clean run plays a song.</p>
+        <button class="primary" id="btn-how-back">BACK</button>
+      </div>
+    </section>
+
+    <!-- Pause -->
+    <section class="screen" id="screen-pause" hidden>
+      <div class="boot-frame">
+        <div class="boot-stamp"><span class="boot-dot pulse"></span><span class="boot-tag">PAUSED</span></div>
+        <h2 class="title small">held in orbit</h2>
+        <button class="primary" id="btn-resume">RESUME</button>
+        <button class="link" id="btn-quit">end run</button>
+      </div>
+    </section>
+
+    <!-- Game over -->
+    <section class="screen" id="screen-over" hidden>
+      <div class="boot-frame">
+        <div class="boot-stamp"><span class="boot-dot warn"></span><span class="boot-tag" id="over-tag">SIGNAL LOST</span></div>
+        <div class="over-score">
+          <div class="over-row"><span class="k">DEPTH</span><span class="v" id="over-score">000</span></div>
+          <div class="over-row"><span class="k">BEST</span><span class="v" id="over-best">000</span></div>
+          <div class="over-row" id="over-new" hidden><span class="badge">NEW BEST</span></div>
+        </div>
+        <button class="primary" id="btn-again">AGAIN</button>
+        <button class="link" id="btn-menu">return to artefact</button>
+      </div>
+    </section>
+
+    <!-- Floating recovered-transmission fragments -->
+    <div class="fragments" id="fragments" aria-hidden="true"></div>
+  </main>
+
+  <script src="game.js" defer></script>
+</body>
+</html>
