@@ -894,7 +894,7 @@
 
   // After the success-phase celebration finishes, transition based on mode
   const onCelebrationEnd = () => {
-    if (G.mode === 'story') endStoryAttempt(true);
+    if (G.mode === 'story' || G.mode === 'sigil') endStoryAttempt(true);
     else if (G.mode === 'daily') endDailyAttempt(true);
     else if (G.mode === 'endless') onEndlessComplete();
   };
@@ -1222,7 +1222,12 @@
   const updateLevelLabel = () => {
     const el = document.getElementById('hud-level');
     if (!el) return;
-    if (G.mode === 'story') {
+    if (G.mode === 'sigil') {
+      const w = (G.playWorldId || 'prime').toUpperCase();
+      const l = String((G.playLevelIdx ?? 0) + 1).padStart(2, '0');
+      const s = String((G.playSigilIdx ?? 0) + 1).padStart(2, '0');
+      el.textContent = `${w} · L${l} · S${s}`;
+    } else if (G.mode === 'story') {
       el.textContent = `SIGIL ${String(G.levelIdx + 1).padStart(2, '0')} / ${String(STORY_LEVELS.length).padStart(2, '0')}`;
     } else if (G.mode === 'daily') {
       el.textContent = `DAILY · ${todayKey()}`;
@@ -2379,7 +2384,8 @@
 
   document.getElementById('btn-fail-retry').addEventListener('click', () => {
     Audio.tick(440);
-    if (G.mode === 'story') startStory(G.levelIdx);
+    if (G.mode === 'sigil') startSigil(G.playWorldId, G.playLevelIdx, G.playSigilIdx);
+    else if (G.mode === 'story') startStory(G.levelIdx);
     else if (G.mode === 'daily') startDaily();
     else startEndless(0);
   });
@@ -2444,7 +2450,8 @@
     Music.setVolume(0.5);
   });
   document.getElementById('btn-restart').addEventListener('click', () => {
-    if (G.mode === 'story') startStory(G.levelIdx);
+    if (G.mode === 'sigil') startSigil(G.playWorldId, G.playLevelIdx, G.playSigilIdx);
+    else if (G.mode === 'story') startStory(G.levelIdx);
     else if (G.mode === 'daily') startDaily();
     else startEndless(0);
   });
