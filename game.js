@@ -1580,6 +1580,13 @@
 
   // Procedural sigil config for a (world, level, sigil) coordinate.
   // Narrative override: PRIME · LEVEL 01 · sigils 0..9 = STORY_LEVELS.
+  // Difficulty curve (see ROADMAP.md §4) staggers mechanic introduction:
+  //   0–49   : stars + decoys
+  //   50–69  : time pressure
+  //   70–89  : hint fade
+  //   90–129 : ×2 knot (one star hit twice)
+  //   130–149: ×2 ×2 (two knots)
+  //   150+   : no hint
   const getSigilCfg = (worldId, levelIdx, sigilIdx) => {
     if (worldId === 'prime' && levelIdx === 0 && sigilIdx < STORY_LEVELS.length) {
       return STORY_LEVELS[sigilIdx];
@@ -1587,15 +1594,86 @@
     const m = WORLD_MECHANIC[worldId] || {};
     const diff = levelIdx * SIGILS_PER_LEVEL + sigilIdx;
     const cfg = {
-      count: Math.min(10, 3 + Math.floor(diff / 12)),
+      count: Math.min(9, 3 + Math.floor(diff / 14)),
       decoys: Math.min(5, Math.floor(diff / 18)),
-      hintFade: diff < 6 ? 0 : Math.max(2, 6 - diff * 0.05),
-      time: diff < 10 ? 0 : Math.max(20, 50 - diff * 0.6),
+      hintFade: 0,
+      time: 0,
       drift: !!m.drift,
-      redCount: m.red ? Math.min(3, 1 + Math.floor(diff / 40)) : 0,
+      redCount: 0,
+      duplicates: 0,
+      noHint: false,
     };
+    if (diff >= 50) cfg.time = Math.max(18, 55 - (diff - 50) * 0.5);
+    if (diff >= 70) cfg.hintFade = Math.max(2, 6 - (diff - 70) * 0.04);
+    if (diff >= 90)  cfg.duplicates = 1;
+    if (diff >= 130) cfg.duplicates = 2;
+    if (diff >= 150) cfg.noHint = true;
+    if (m.red) cfg.redCount = Math.min(3, 1 + Math.floor(diff / 40));
+    if (m.redDrift) cfg.redDrift = true;
     if (m.hintFadeMul && cfg.hintFade > 0) cfg.hintFade *= m.hintFadeMul;
     return cfg;
+  };
+
+  // Map of mechanic flag → first-time intro shown to the player.
+  // The first sigil a player encounters that has this flag pops up the
+  // overlay; subsequent encounters skip it (persisted in store.introsSeen).
+  const MECHANIC_INTROS = {
+    decoys: {
+      key: 'decoys',
+      title: 'DECOYS',
+      body: 'extra stars appear that aren\'t on the path. touching one resets your stroke.',
+      test: (cfg) => (cfg.decoys || 0) > 0,
+    },
+    time: {
+      key: 'time',
+      title: 'TIME',
+      body: 'the sigil decays. complete it before the timer runs out.',
+      test: (cfg) => (cfg.time || 0) > 0,
+    },
+    hintFade: {
+      key: 'hintFade',
+      title: 'FADING HINTS',
+      body: 'the dashed path fades a few seconds in. remember the shape before it\'s gone.',
+      test: (cfg) => (cfg.hintFade || 0) > 0 && !cfg.noHint,
+    },
+    drift: {
+      key: 'drift',
+      title: 'DRIFT',
+      body: 'the stars are moving. wait for them. lead your trace.',
+      test: (cfg) => !!cfg.drift,
+    },
+    red: {
+      key: 'red',
+      title: 'RED STARS',
+      body: 'red stars are hostile. your trace line cannot pass within their range.',
+      test: (cfg) => (cfg.redCount || 0) > 0,
+    },
+    duplicates: {
+      key: 'duplicates',
+      title: '×2 KNOT',
+      body: 'some stars must be touched twice. they pulse with a small ×2 badge when they need another visit.',
+      test: (cfg) => (cfg.duplicates || 0) > 0,
+    },
+    noHint: {
+      key: 'noHint',
+      title: 'NO HINT',
+      body: 'no path is shown. you must deduce the order from the stars themselves. trust the shape.',
+      test: (cfg) => !!cfg.noHint,
+    },
+  };
+
+  // Build the per-sigil tip strip text from the config
+  const buildTip = (cfg) => {
+    const parts = [];
+    parts.push(`${cfg.count} stars`);
+    if (cfg.decoys > 0) parts.push(`${cfg.decoys} decoy${cfg.decoys === 1 ? '' : 's'}`);
+    if (cfg.duplicates > 0) parts.push(`${cfg.duplicates === 1 ? '×2 knot' : `${cfg.duplicates} ×2 knots`}`);
+    if (cfg.drift) parts.push('drift');
+    if (cfg.redCount > 0) parts.push(`${cfg.redCount} red`);
+    if (cfg.noHint) parts.push('no hint');
+    else if (cfg.hintFade > 0) parts.push('hint fades');
+    if (cfg.time > 0) parts.push(`${Math.round(cfg.time)}s`);
+    return parts.join(' · ');
   };
 
   // Generate the 10 sigil configs for a level
