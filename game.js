@@ -604,15 +604,50 @@
     // your stroke around moving hazards.
     const redStars = [];
     const redCount = cfg.redCount || 0;
-    for (let i = 0; i < redCount; i++) {
-      let x, y, ok = false;
-      for (let tries = 0; tries < 80 && !ok; tries++) {
-        x = r(margin + 12, W - margin - 12);
-        y = r(PLAY_TOP + margin + 12, H - PLAY_BOTTOM - margin - 12);
-        const tooClose = nodes.some(n => dist(n.baseX, n.baseY, x, y) < 56);
-        const tooClose2 = redStars.some(rr => dist(rr.x, rr.y, x, y) < 90);
-        ok = !tooClose && !tooClose2;
+
+    // Place a red star so it sits NEAR a path segment — guaranteed to
+    // intercept the player's trace as it orbits. Falls back to random
+    // placement if it can't find a workable spot.
+    const placeRedNearSegment = () => {
+      if (path.length < 2) return null;
+      for (let attempt = 0; attempt < 40; attempt++) {
+        const segIdx = Math.floor(rng() * (path.length - 1));
+        const a = nodes[path[segIdx]];
+        const b = nodes[path[segIdx + 1]];
+        const t = 0.30 + rng() * 0.40;
+        const mx = a.baseX + (b.baseX - a.baseX) * t;
+        const my = a.baseY + (b.baseY - a.baseY) * t;
+        const sx = b.baseX - a.baseX, sy = b.baseY - a.baseY;
+        const len = Math.hypot(sx, sy) || 1;
+        const px = -sy / len, py = sx / len;
+        const offset = 32 + rng() * 36;
+        const sign = rng() < 0.5 ? 1 : -1;
+        const x = mx + px * offset * sign;
+        const y = my + py * offset * sign;
+        if (x < margin + 12 || x > W - margin - 12) continue;
+        if (y < PLAY_TOP + margin + 12 || y > H - PLAY_BOTTOM - margin - 12) continue;
+        if (nodes.some(n => dist(n.baseX, n.baseY, x, y) < 50)) continue;
+        if (redStars.some(rr => dist(rr.x, rr.y, x, y) < 90)) continue;
+        return { x, y };
       }
+      return null;
+    };
+
+    for (let i = 0; i < redCount; i++) {
+      let pos = placeRedNearSegment();
+      if (!pos) {
+        // Fallback: original random placement
+        let x, y, ok = false;
+        for (let tries = 0; tries < 50 && !ok; tries++) {
+          x = r(margin + 12, W - margin - 12);
+          y = r(PLAY_TOP + margin + 12, H - PLAY_BOTTOM - margin - 12);
+          const tooClose = nodes.some(n => dist(n.baseX, n.baseY, x, y) < 56);
+          const tooClose2 = redStars.some(rr => dist(rr.x, rr.y, x, y) < 90);
+          ok = !tooClose && !tooClose2;
+        }
+        pos = { x, y };
+      }
+      const { x, y } = pos;
       const red = { x, y, baseX: x, baseY: y, pulse: rng() * TAU };
       if (cfg.redDrift) {
         const intensity = cfg.redIntensity ?? 0.2;
@@ -626,13 +661,14 @@
             vy: Math.sin(ang) * sp,
           };
         } else {
+          // Orbit radius scaled so that even at low intensity the red
+          // sweeps far enough to actually cross the nearest path segment
+          // (red is placed ~32–68 px from a line; min radius 50 guarantees
+          // an intercept).
           red.drift = {
             cx: x, cy: y,
-            // Sweep wider (covers more of the field) and orbit faster as
-            // intensity rises. At intensity 1 a full orbit completes in
-            // ~7s; at 0 it's ~50s.
-            radius: 30 + 30 * intensity + rng() * (28 + 60 * intensity),
-            speed: 0.16 + 0.50 * intensity + rng() * (0.16 + 0.40 * intensity),
+            radius: 50 + 30 * intensity + rng() * (28 + 60 * intensity),
+            speed: 0.22 + 0.55 * intensity + rng() * (0.18 + 0.40 * intensity),
             phase: rng() * TAU,
           };
         }
