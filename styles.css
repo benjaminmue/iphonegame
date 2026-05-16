@@ -676,7 +676,17 @@ body { position: fixed; inset: 0; }
   position: relative;
   margin: 8px 0;
   min-height: 0;
+  overflow: hidden;
+  touch-action: none;
 }
+.map-content {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 50%;
+  transform: translate(0px, 0px) scale(1);
+  will-change: transform;
+}
+.map-content.tween { transition: transform 280ms cubic-bezier(.2,.7,.2,1); }
 .map-svg {
   position: absolute;
   inset: 0;
@@ -687,6 +697,31 @@ body { position: fixed; inset: 0; }
   position: absolute;
   inset: 0;
 }
+.map-zoom-controls {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 5;
+}
+.map-zoom-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  font-size: 18px;
+  font-family: inherit;
+  display: grid;
+  place-items: center;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  cursor: pointer;
+}
+.map-zoom-btn:active { transform: scale(0.92); background: rgba(255, 255, 255, 0.10); }
 .map-node {
   position: absolute;
   transform: translate(-50%, -50%);
@@ -723,21 +758,30 @@ body { position: fixed; inset: 0; }
   color: var(--ink);
   text-align: center;
   text-shadow: 0 0 8px rgba(0,0,0,0.7);
+  max-width: 110px;
+  line-height: 1.2;
 }
 .map-node-meta {
   font-size: 9px;
   letter-spacing: 0.18em;
   color: var(--ink-faint);
+  text-shadow: 0 0 6px rgba(0,0,0,0.7);
 }
 
-/* Locked nodes */
+/* Locked nodes — smaller footprint so they don't collide while orbiting */
 .map-node.locked .map-node-dot {
   background: rgba(90, 80, 110, 0.5);
   box-shadow: none;
   border-color: rgba(165, 157, 186, 0.25);
+  width: 14px; height: 14px;
 }
 .map-node.locked .map-node-dot::after { display: none; }
-.map-node.locked .map-node-label { color: var(--ink-faint); }
+.map-node.locked .map-node-label {
+  color: var(--ink-faint);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+}
+.map-node.locked .map-node-meta { display: none; }
 
 /* Current / featured node */
 .map-node.current .map-node-dot {
@@ -755,6 +799,39 @@ body { position: fixed; inset: 0; }
   0%, 100% { transform: scale(1); }
   50%      { transform: scale(1.15); }
 }
+
+/* Central Sun (in solar view) and Galactic Core (in galaxy view) */
+.map-node.sun .map-node-dot {
+  width: 32px; height: 32px;
+  background: rgba(255, 245, 216, 0.25);
+  box-shadow: 0 0 18px rgba(255, 245, 216, 0.18);
+  border-color: rgba(241, 234, 216, 0.25);
+}
+.map-node.sun.sealed .map-node-dot::after {
+  content: "";
+  position: absolute; inset: -6px;
+  border-radius: 50%;
+  border: 1px dashed rgba(241, 234, 216, 0.18);
+}
+.map-node.sun.ready .map-node-dot {
+  background: var(--warm);
+  box-shadow: 0 0 26px rgba(255, 184, 107, 0.85);
+  border-color: var(--warm);
+  animation: pulse-current 1.8s ease-in-out infinite;
+}
+.map-node.sun .map-node-label {
+  font-size: 10px;
+  letter-spacing: 0.32em;
+  margin-top: 4px;
+  color: var(--ink);
+}
+.map-node.sun.sealed .map-node-label { color: var(--ink-faint); }
+.map-node.sun .map-node-meta {
+  font-size: 9px;
+  letter-spacing: 0.32em;
+  color: var(--ink-faint);
+}
+.map-node.sun.ready .map-node-meta { color: var(--warm); }
 
 /* Sigil node (world view) — smaller, numbered */
 .sigil-node {

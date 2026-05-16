@@ -1350,75 +1350,299 @@
   // Data-driven so updates can append content without rewriting.
   // Position fields are normalized 0..1 within their parent view.
   // -------------------------------------------------------------------------
+  // Orbit tiers — multiple rings; closer = faster (vague Kepler).
+  // r is fraction of map half-extent from centre; speed is rad/sec.
+  // Spacing of 0.12 between rings so labels never collide vertically.
+  const TIERS = {
+    nucleus: { r: 0.10, speed: 0.18 },
+    inner:   { r: 0.22, speed: 0.11 },
+    mid:     { r: 0.34, speed: 0.07 },
+    outer:   { r: 0.46, speed: 0.045 },
+  };
+
+  // Each solar/world has orbit: { r, baseAngle, speed }.
+  // Stories are organised: world → sigils → levels (indices into STORY_LEVELS).
   const GALAXY = {
+    id: 'remembered',
     name: 'REMEMBERED',
     systems: [
-      // Top rim
-      { id: 'null',         name: 'NULL',         kicker: 'no carrier',
-        x: 0.50, y: 0.07, unlocked: false,
-        note: 'the silence between transmissions. last solar in the galaxy.', worlds: [] },
-      { id: 'deepcarrier',  name: 'DEEP CARRIER', kicker: 'below the band',
-        x: 0.22, y: 0.18, unlocked: false,
-        note: 'a sub-frequency. requires HOMEKEEPER · whole.', worlds: [] },
-      { id: 'nineteen',     name: '1981',         kicker: 'the year they left',
-        x: 0.78, y: 0.18, unlocked: false,
-        note: 'the operator who closed the room. requires MNEMOSYNE.', worlds: [] },
-
-      // Upper orbit
-      { id: 'farecho',      name: 'FAR ECHO',     kicker: 'past signal',
-        x: 0.12, y: 0.36, unlocked: false,
-        note: 'reachable when HOMEKEEPER · PRIME is complete.', worlds: [] },
-      { id: 'outer',        name: 'OUTER',        kicker: 'edge of carrier',
-        x: 0.88, y: 0.36, unlocked: false,
-        note: 'a faint signal. coming in a future update.', worlds: [] },
-
-      // Centre — the live solar
+      // ── inner orbit
       {
         id: 'homekeeper', name: 'HOMEKEEPER', kicker: 'home system',
-        x: 0.50, y: 0.50, unlocked: true,
+        orbit: { r: TIERS.outer.r, baseAngle: Math.PI * 0.5, speed: TIERS.outer.speed },
+        unlocked: true,
+        sun: {
+          id: 'homekeeper-sun', name: 'HEART OF HOMEKEEPER',
+          kicker: 'the home star',
+          locked_note: 'sealed · lights up when every world is whole.',
+          ready_note: 'the heart is open. (final challenge — next update)',
+        },
+        // 10 worlds, progressively harder. Each introduces a mechanic.
+        // requires: id of the previous world that must be whole to unlock.
         worlds: [
-          { id: 'prime', name: 'PRIME', kicker: 'the message',
-            x: 0.50, y: 0.50, unlocked: true,
-            sigilCount: STORY_LEVELS.length, mode: 'story' },
-          { id: 'drift', name: 'DRIFT', kicker: 'moving stars',
-            x: 0.22, y: 0.74, unlocked: false, sigilCount: 24, mode: 'drift',
-            note: 'unlocked once homekeeper · prime is complete (next update)' },
-          { id: 'cross', name: 'CROSS', kicker: 'avoid the red',
-            x: 0.78, y: 0.74, unlocked: false, sigilCount: 24, mode: 'cross',
-            note: 'requires drift · coming soon' },
+          {
+            id: 'prime', name: 'PRIME', kicker: 'the message',
+            mechanic: 'basic tracing',
+            orbit: { r: 0.46, baseAngle: -Math.PI / 2, speed: 0.045 },
+            unlocked: true,
+            sigils: [
+              { id: 'reaching',   name: 'REACHING',   levels: [0, 1] },
+              { id: 'holding',    name: 'HOLDING',    levels: [2, 3] },
+              { id: 'waiting',    name: 'WAITING',    levels: [4, 5] },
+              { id: 'remembered', name: 'REMEMBERED', levels: [6, 7] },
+              { id: 'found',      name: 'FOUND',      levels: [8, 9] },
+            ],
+          },
+          {
+            id: 'drift', name: 'DRIFT', kicker: 'moving stars',
+            mechanic: 'stars orbit — lead your trace',
+            orbit: { r: 0.40, baseAngle: Math.PI * 0.85, speed: 0.062 },
+            requires: 'prime', unlocked: false, sigils: [],
+          },
+          {
+            id: 'cross', name: 'CROSS', kicker: 'avoid the red',
+            mechanic: 'red stars — do not cross',
+            orbit: { r: 0.40, baseAngle: Math.PI * 0.15, speed: 0.060 },
+            requires: 'drift', unlocked: false, sigils: [],
+          },
+          {
+            id: 'echo', name: 'ECHO', kicker: 'fading hints',
+            mechanic: 'hints fade fast — remember the shape',
+            orbit: { r: 0.34, baseAngle: Math.PI * 1.10, speed: 0.082 },
+            requires: 'cross', unlocked: false, sigils: [],
+          },
+          {
+            id: 'mirror', name: 'MIRROR', kicker: 'reflected',
+            mechanic: 'trace the mirrored shape',
+            orbit: { r: 0.34, baseAngle: Math.PI * 1.90, speed: 0.078 },
+            requires: 'echo', unlocked: false, sigils: [],
+          },
+          {
+            id: 'hold', name: 'HOLD', kicker: 'press to anchor',
+            mechanic: 'hold each star to lock it',
+            orbit: { r: 0.28, baseAngle: Math.PI * 0.45, speed: 0.110 },
+            requires: 'mirror', unlocked: false, sigils: [],
+          },
+          {
+            id: 'pulse', name: 'PULSE', kicker: 'on the beat',
+            mechanic: 'stars pulse — strike on rhythm',
+            orbit: { r: 0.28, baseAngle: Math.PI * 1.55, speed: 0.105 },
+            requires: 'hold', unlocked: false, sigils: [],
+          },
+          {
+            id: 'whisper', name: 'WHISPER', kicker: 'unseen',
+            mechanic: 'stars hidden — tap to peek briefly',
+            orbit: { r: 0.22, baseAngle: Math.PI * 0.20, speed: 0.150 },
+            requires: 'pulse', unlocked: false, sigils: [],
+          },
+          {
+            id: 'fork', name: 'FORK', kicker: 'choose the path',
+            mechanic: 'branching paths — pick the right one',
+            orbit: { r: 0.22, baseAngle: Math.PI * 1.80, speed: 0.140 },
+            requires: 'whisper', unlocked: false, sigils: [],
+          },
+          {
+            id: 'entropy', name: 'ENTROPY', kicker: 'everything at once',
+            mechanic: 'every mechanic combined — closest to the heart',
+            orbit: { r: 0.15, baseAngle: Math.PI * 1.00, speed: 0.230 },
+            requires: 'fork', unlocked: false, sigils: [],
+          },
         ],
       },
 
-      // Lower orbit
-      { id: 'mnemosyne',    name: 'MNEMOSYNE',    kicker: 'memory orbit',
-        x: 0.12, y: 0.64, unlocked: false,
-        note: 'before the keys were ever pressed. requires FAR ECHO.', worlds: [] },
-      { id: 'lunaria',      name: 'LUNARIA',      kicker: 'a named moon',
-        x: 0.88, y: 0.64, unlocked: false,
-        note: 'the moon you orbit. requires OUTER.', worlds: [] },
+      // ── mid ring (4 solars on diagonals — clear of HOMEKEEPER's vertical line)
+      { id: 'deepcarrier', name: 'DEEP CARRIER', kicker: 'below the band',
+        orbit: { r: TIERS.mid.r, baseAngle: Math.PI * 0.25, speed: TIERS.mid.speed },
+        requires: 'homekeeper', unlocked: false, worlds: [],
+        note: 'a sub-frequency. requires HOMEKEEPER · whole.' },
+      { id: 'nineteen',    name: '1981',         kicker: 'the year they left',
+        orbit: { r: TIERS.mid.r, baseAngle: Math.PI * 0.75, speed: TIERS.mid.speed * 1.05 },
+        requires: 'deepcarrier', unlocked: false, worlds: [],
+        note: 'the operator who closed the room.' },
+      { id: 'farecho',     name: 'FAR ECHO',     kicker: 'past signal',
+        orbit: { r: TIERS.mid.r, baseAngle: Math.PI * 1.25, speed: TIERS.mid.speed * 0.95 },
+        requires: 'nineteen', unlocked: false, worlds: [],
+        note: 'reachable when 1981 is whole.' },
+      { id: 'outer',       name: 'OUTER',        kicker: 'edge of carrier',
+        orbit: { r: TIERS.mid.r, baseAngle: Math.PI * 1.75, speed: TIERS.mid.speed * 1.08 },
+        requires: 'farecho', unlocked: false, worlds: [],
+        note: 'a faint signal.' },
 
-      // Lower rim
-      { id: 'thequiet',     name: 'THE QUIET',    kicker: 'between keys',
-        x: 0.22, y: 0.82, unlocked: false,
-        note: 'the long pause. requires 1981.', worlds: [] },
-      { id: 'coldroom',     name: 'COLD ROOM',    kicker: 'the waiting',
-        x: 0.78, y: 0.82, unlocked: false,
-        note: 'they left the radio on. requires DEEP CARRIER.', worlds: [] },
+      // ── inner ring (4 solars at cardinals — offset 45° from mid)
+      { id: 'mnemosyne',   name: 'MNEMOSYNE',    kicker: 'memory orbit',
+        orbit: { r: TIERS.inner.r, baseAngle: Math.PI * 0.0, speed: TIERS.inner.speed * 1.05 },
+        requires: 'outer', unlocked: false, worlds: [],
+        note: 'before the keys were ever pressed.' },
+      { id: 'lunaria',     name: 'LUNARIA',      kicker: 'a named moon',
+        orbit: { r: TIERS.inner.r, baseAngle: Math.PI * 0.5, speed: TIERS.inner.speed * 1.08 },
+        requires: 'mnemosyne', unlocked: false, worlds: [],
+        note: 'the moon you orbit.' },
+      { id: 'thequiet',    name: 'THE QUIET',    kicker: 'between keys',
+        orbit: { r: TIERS.inner.r, baseAngle: Math.PI * 1.0, speed: TIERS.inner.speed * 0.97 },
+        requires: 'lunaria', unlocked: false, worlds: [],
+        note: 'the long pause.' },
+      { id: 'coldroom',    name: 'COLD ROOM',    kicker: 'the waiting',
+        orbit: { r: TIERS.inner.r, baseAngle: Math.PI * 1.5, speed: TIERS.inner.speed * 0.92 },
+        requires: 'thequiet', unlocked: false, worlds: [],
+        note: 'they left the radio on.' },
 
-      // Bottom
-      { id: 'hibernal',     name: 'HIBERNAL',     kicker: 'sleep cycle',
-        x: 0.38, y: 0.93, unlocked: false,
-        note: 'winters between transmissions. requires LUNARIA.', worlds: [] },
-      { id: 'origin',       name: 'ORIGIN',       kicker: 'unknown',
-        x: 0.62, y: 0.93, unlocked: false,
-        note: 'silent. for now.', worlds: [] },
+      // ── nucleus (3 solars evenly spaced at thirds — closest to the core)
+      { id: 'hibernal', name: 'HIBERNAL', kicker: 'sleep cycle',
+        orbit: { r: TIERS.nucleus.r, baseAngle: Math.PI * 0.33, speed: TIERS.nucleus.speed * 0.95 },
+        requires: 'coldroom', unlocked: false, worlds: [],
+        note: 'winters between transmissions.' },
+      { id: 'null',     name: 'NULL',     kicker: 'no carrier',
+        orbit: { r: TIERS.nucleus.r, baseAngle: Math.PI * 1.0, speed: TIERS.nucleus.speed * 1.10 },
+        requires: 'hibernal', unlocked: false, worlds: [],
+        note: 'the silence between transmissions.' },
+      { id: 'origin',   name: 'ORIGIN',   kicker: 'unknown',
+        orbit: { r: TIERS.nucleus.r, baseAngle: Math.PI * 1.67, speed: TIERS.nucleus.speed * 1.05 },
+        requires: 'null', unlocked: false, worlds: [],
+        note: 'the heart of the galaxy. silent. for now.' },
     ],
+    // The galactic core — pure centre, the last thing to reach.
+    core: {
+      id: 'galactic-core', name: 'CORE',
+      locked_note: 'sealed. all of REMEMBERED must be whole.',
+      ready_note: 'the core is open. (terminal challenge — future update)',
+    },
   };
 
+  // Completion checks — derive solely from store.recoveredLines so the
+  // four-tier hierarchy is automatic.
+  const isSigilDone = (sig) => sig.levels.length > 0 && sig.levels.every(i => store.recoveredLines.includes(i));
+  const isWorldDone = (w) => (w.sigils?.length || 0) > 0 && w.sigils.every(isSigilDone);
+  const isSolarDone = (s) => (s.worlds?.length || 0) > 0 && s.worlds.every(isWorldDone);
+
+  // Order of completion — used to draw connection lines between completed
+  // entities so the "sigil" they form follows orbital motion.
+  const ensureOrderArrays = () => {
+    if (!Array.isArray(store.completedSigilOrder)) store.completedSigilOrder = [];
+    if (!Array.isArray(store.completedWorldOrder)) store.completedWorldOrder = [];
+    if (!Array.isArray(store.completedSolarOrder)) store.completedSolarOrder = [];
+  };
+  ensureOrderArrays();
+
   const Map = (() => {
-    let view = 'galaxy';      // 'galaxy' | 'solar' | 'world'
+    let view = 'galaxy';      // 'galaxy' | 'solar' | 'world' | 'sigil'
     let sysId = null;
     let worldId = null;
+    let sigilId = null;
+
+    // Orbital animation
+    let animFrame = null;
+    let animStart = 0;
+    const nodeRefs = new globalThis.Map();   // entityId -> button el
+    const orbitInfo = new globalThis.Map();  // entityId -> orbit
+
+    // Zoom + pan
+    let scale = 1, tx = 0, ty = 0;
+    const SCALE_MIN = 0.7, SCALE_MAX = 3.2;
+    const pointers = new globalThis.Map();
+    let pinchStartDist = 0, pinchStartScale = 1;
+    let panStartX = 0, panStartY = 0, panOriginX = 0, panOriginY = 0;
+    let suppressClick = false;
+    let movedSinceDown = false;
+
+    const applyTransform = (tween) => {
+      const content = document.getElementById('map-content');
+      if (!content) return;
+      content.classList.toggle('tween', !!tween);
+      content.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+    };
+    const resetTransform = (tween) => {
+      scale = 1; tx = 0; ty = 0;
+      applyTransform(tween);
+    };
+    const setScale = (next, tween) => {
+      scale = clamp(next, SCALE_MIN, SCALE_MAX);
+      applyTransform(tween);
+    };
+
+    // Drill-down zoom navigation. Camera dives into (cx, cy) (in normalised
+    // map coords 0..1), then swaps view content while invisible, then settles.
+    let isZooming = false;
+    const zoomInto = (cx, cy, callback) => {
+      if (isZooming) return;
+      isZooming = true;
+      const canv = document.getElementById('map-canvas');
+      const content = document.getElementById('map-content');
+      const w = canv.offsetWidth, h = canv.offsetHeight;
+      const targetScale = 2.6;
+      scale = targetScale;
+      tx = w * (0.5 - cx) * targetScale;
+      ty = h * (0.5 - cy) * targetScale;
+      content.style.transition =
+        'transform 420ms cubic-bezier(.4,0,.2,1), opacity 220ms ease 180ms';
+      content.style.opacity = '0';
+      applyTransform(false); // CSS transition above handles the tween
+      setTimeout(() => {
+        callback(); // swaps view: clears map, resets transform to identity
+        // Fade the new content in from a slightly larger scale
+        scale = 1.15; tx = 0; ty = 0;
+        applyTransform(false);
+        content.style.transition = 'opacity 220ms ease, transform 320ms cubic-bezier(.4,0,.2,1)';
+        content.style.opacity = '1';
+        requestAnimationFrame(() => {
+          scale = 1; applyTransform(false);
+        });
+        setTimeout(() => {
+          isZooming = false;
+          content.style.transition = '';
+        }, 360);
+      }, 440);
+    };
+    const zoomOut = (callback) => {
+      if (isZooming) return;
+      isZooming = true;
+      const content = document.getElementById('map-content');
+      scale = 0.55; tx = 0; ty = 0;
+      content.style.transition =
+        'transform 320ms cubic-bezier(.4,0,.2,1), opacity 220ms ease';
+      content.style.opacity = '0';
+      applyTransform(false);
+      setTimeout(() => {
+        callback();
+        scale = 1; tx = 0; ty = 0;
+        content.style.transition = 'opacity 240ms ease';
+        content.style.opacity = '1';
+        applyTransform(false);
+        setTimeout(() => {
+          isZooming = false;
+          content.style.transition = '';
+        }, 280);
+      }, 340);
+    };
+
+    const orbitalPos = (orbit, t, cx = 0.5, cy = 0.5) => {
+      const angle = orbit.baseAngle + orbit.speed * t;
+      return { x: cx + orbit.r * Math.cos(angle), y: cy + orbit.r * Math.sin(angle) };
+    };
+
+    const startAnim = () => {
+      if (animFrame) return;
+      animStart = performance.now() / 1000;
+      const loop = (t) => {
+        animFrame = requestAnimationFrame(loop);
+        const elapsed = t / 1000 - animStart;
+        // Update DOM positions
+        nodeRefs.forEach((el, id) => {
+          const orbit = orbitInfo.get(id);
+          if (!orbit) return;
+          const p = orbitalPos(orbit, elapsed);
+          el.style.left = (p.x * 100) + '%';
+          el.style.top = (p.y * 100) + '%';
+        });
+        // Re-draw connection lines (only present after entries complete)
+        redrawConnections(elapsed);
+      };
+      animFrame = requestAnimationFrame(loop);
+    };
+    const stopAnim = () => {
+      if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+      nodeRefs.clear();
+      orbitInfo.clear();
+    };
 
     const svg = () => document.getElementById('map-svg');
     const nodes = () => document.getElementById('map-nodes');
@@ -1478,85 +1702,181 @@
       return b;
     };
 
+    const isUnlockedSolar = (sys) => {
+      if (sys.unlocked) return true;
+      if (!sys.requires) return false;
+      const req = GALAXY.systems.find(s => s.id === sys.requires);
+      return req && isSolarDone(req);
+    };
+    const isUnlockedWorld = (sys, w) => {
+      if (w.unlocked) return true;
+      if (!w.requires) return false;
+      const req = sys.worlds.find(x => x.id === w.requires);
+      return req && isWorldDone(req);
+    };
+
     const renderGalaxy = () => {
+      stopAnim();
       clearMap();
       setHeader('GALAXY', GALAXY.name);
 
-      // A few concentric reference rings — feels like a galactic chart
-      // without drawing twelve overlapping circles.
-      [180, 320, 460].forEach(r => {
-        circleSvg(500, 500, r, {
-          stroke: 'rgba(241, 234, 216, 0.05)', dash: '2 8',
-        });
+      // Draw one ring per unique orbital radius — multiple concentric orbits
+      const uniqueRs = [...new Set(GALAXY.systems.map(s => Math.round(s.orbit.r * 1000)))];
+      uniqueRs.forEach(rv => {
+        circleSvg(500, 500, rv, { stroke: 'rgba(241, 234, 216, 0.05)', dash: '2 8' });
       });
-      // Central singularity / unknown core
-      circleSvg(500, 500, 30, { stroke: 'rgba(255, 245, 216, 0.18)', dash: '3 5' });
-      circleSvg(500, 500, 6, { fill: 'rgba(255, 245, 216, 0.55)' });
 
+      // Galactic core (terminal). Visible always, sealed by default.
+      const allSolarsDone = GALAXY.systems.every(s => isSolarDone(s));
+      drawCore(allSolarsDone);
+
+      // Place each solar at its starting orbital position
+      const t0 = 0;
       GALAXY.systems.forEach(sys => {
+        const unlocked = isUnlockedSolar(sys);
+        const done = isSolarDone(sys);
+        const pos = orbitalPos(sys.orbit, t0);
         const totalWorlds = sys.worlds.length;
-        const unlockedWorlds = sys.worlds.filter(w => w.unlocked).length;
-        const meta = sys.unlocked
-          ? (totalWorlds > 0 ? `${unlockedWorlds} / ${totalWorlds} worlds` : 'empty')
-          : 'locked';
-        const cls = sys.unlocked ? 'current' : 'locked';
-        makeNode(sys.x, sys.y, sys.name, cls, meta, () => {
-          if (sys.unlocked) showSolar(sys.id);
-          else setStatus(sys.note || 'locked.');
+        const unlockedCount = sys.worlds.filter(w => isUnlockedWorld(sys, w)).length;
+        const meta = !unlocked ? 'sealed'
+                   : done ? 'whole'
+                   : (totalWorlds > 0 ? `${unlockedCount} / ${totalWorlds} worlds` : 'empty');
+        const cls = done ? 'complete' : unlocked ? 'current' : 'locked';
+        const lockMsg = !unlocked
+          ? (sys.requires ? `sealed · complete ${(GALAXY.systems.find(s => s.id === sys.requires)?.name) || sys.requires} to unlock`
+                          : (sys.note || 'sealed.'))
+          : null;
+        const el = makeNode(pos.x, pos.y, sys.name, cls, meta, () => {
+          if (unlocked) {
+            // Use the solar's current orbital position when zooming
+            const t = (performance.now() / 1000) - animStart;
+            const cur = orbitalPos(sys.orbit, t);
+            zoomInto(cur.x, cur.y, () => showSolar(sys.id));
+          } else {
+            setStatus(lockMsg);
+          }
         });
+        nodeRefs.set('sys:' + sys.id, el);
+        orbitInfo.set('sys:' + sys.id, sys.orbit);
       });
 
       setStatus('tap a solar system to descend');
+      startAnim();
+    };
+
+    const drawCore = (ready) => {
+      // Inner sealing rings — visually distinct from regular orbits
+      circleSvg(500, 500, 30, {
+        stroke: ready ? 'rgba(255, 184, 107, 0.55)' : 'rgba(255, 245, 216, 0.12)',
+        dash: ready ? null : '3 5',
+        width: ready ? 1.2 : 0.6,
+      });
+      circleSvg(500, 500, 10, { fill: ready ? 'rgba(255, 184, 107, 0.85)' : 'rgba(255, 245, 216, 0.35)' });
+
+      // Add a tappable core node label
+      const el = document.createElement('button');
+      el.className = 'map-node sun ' + (ready ? 'ready' : 'sealed');
+      el.style.left = '50%';
+      el.style.top = '50%';
+      const dot = document.createElement('div'); dot.className = 'map-node-dot sun-dot';
+      const lbl = document.createElement('div'); lbl.className = 'map-node-label'; lbl.textContent = GALAXY.core.name;
+      const meta = document.createElement('div'); meta.className = 'map-node-meta';
+      meta.textContent = ready ? 'open' : 'sealed';
+      el.appendChild(dot); el.appendChild(lbl); el.appendChild(meta);
+      el.addEventListener('click', () => {
+        setStatus(ready ? GALAXY.core.ready_note : GALAXY.core.locked_note);
+      });
+      nodes().appendChild(el);
     };
 
     const renderSolar = (id) => {
       sysId = id;
+      stopAnim();
       const sys = GALAXY.systems.find(s => s.id === id);
       if (!sys) return renderGalaxy();
       applyPalette(paletteFor('REMEMBERED', id));
       clearMap();
       setHeader('SOLAR · ' + GALAXY.name, sys.name);
 
-      // central star of the system
-      circleSvg(500, 500, 18, { stroke: 'rgba(255, 184, 107, 0.7)', width: 1.2 });
-      circleSvg(500, 500, 8, { fill: 'rgba(255, 184, 107, 0.5)' });
-
-      // worlds orbit the star
-      sys.worlds.forEach(w => {
-        const wx = w.x * 1000, wy = w.y * 1000;
-        const r = dist(500, 500, wx, wy);
-        circleSvg(500, 500, r, {
-          stroke: w.unlocked ? accentRgba(0.22) : 'rgba(241, 234, 216, 0.05)',
-          dash: '2 6',
-        });
+      // Multiple orbital rings — one per unique orbit radius among this
+      // solar's worlds. The Sun lives at centre.
+      const worldRs = [...new Set(sys.worlds.map(w => Math.round(w.orbit.r * 1000)))];
+      worldRs.forEach(rv => {
+        circleSvg(500, 500, rv, { stroke: 'rgba(241, 234, 216, 0.05)', dash: '2 8' });
       });
+
+      // Central Sun — terminal challenge of the solar system
+      if (sys.sun) {
+        const allDone = sys.worlds.length > 0 && sys.worlds.every(isWorldDone);
+        drawSun(sys, allDone);
+      }
 
       if (sys.worlds.length === 0) {
         const div = document.createElement('div');
-        div.className = 'map-node current';
-        div.style.left = '50%'; div.style.top = '50%';
-        div.style.transform = 'translate(-50%, -50%)';
+        div.className = 'map-node locked';
+        div.style.left = '50%'; div.style.top = '14%';
         const lbl = document.createElement('div');
         lbl.className = 'map-node-label';
         lbl.textContent = sys.note || 'empty';
         div.appendChild(lbl);
         nodes().appendChild(div);
       } else {
+        const t0 = 0;
         sys.worlds.forEach(w => {
-          const meta = w.unlocked ? `${w.sigilCount} sigils` : 'locked';
-          let cls = w.unlocked ? '' : 'locked';
-          // Mark prime as complete or current
-          if (w.unlocked && w.id === 'prime') {
-            cls = store.complete ? 'complete' : 'current';
-          }
-          makeNode(w.x, w.y, w.name, cls, meta,
-            w.unlocked ? () => showWorld(sys.id, w.id) : null);
+          const unlocked = isUnlockedWorld(sys, w);
+          const done = isWorldDone(w);
+          const pos = orbitalPos(w.orbit, t0);
+          const meta = !unlocked ? 'sealed'
+                     : done ? 'whole'
+                     : `${w.sigils.length} sigils`;
+          const cls = done ? 'complete' : unlocked ? 'current' : 'locked';
+          const lockMsg = !unlocked
+            ? (w.requires
+                ? `sealed · complete ${(sys.worlds.find(x => x.id === w.requires)?.name) || w.requires} to unlock`
+                : (w.note || 'sealed.'))
+            : (w.mechanic ? `tap to enter · ${w.mechanic}` : 'tap to enter');
+          const el = makeNode(pos.x, pos.y, w.name, cls, meta, () => {
+            if (unlocked) {
+              const t = (performance.now() / 1000) - animStart;
+              const cur = orbitalPos(w.orbit, t);
+              zoomInto(cur.x, cur.y, () => showWorld(sys.id, w.id));
+            } else {
+              setStatus(lockMsg);
+            }
+          });
+          nodeRefs.set('w:' + w.id, el);
+          orbitInfo.set('w:' + w.id, w.orbit);
         });
       }
 
-      setStatus(sys.worlds.some(w => w.unlocked) ?
-        'tap a world to see its sigils' :
-        sys.note || 'no worlds online yet');
+      const someUnlocked = sys.worlds.some(w => isUnlockedWorld(sys, w));
+      setStatus(someUnlocked ? 'tap a world to see its sigils' : (sys.note || 'no worlds online yet'));
+      startAnim();
+    };
+
+    const drawSun = (sys, ready) => {
+      // The Sun visualisation lives at the centre.
+      circleSvg(500, 500, 28, {
+        stroke: ready ? 'rgba(255, 184, 107, 0.7)' : 'rgba(255, 245, 216, 0.12)',
+        dash: ready ? null : '3 5',
+        width: ready ? 1.4 : 0.6,
+      });
+      circleSvg(500, 500, 12, { fill: ready ? 'rgba(255, 184, 107, 0.85)' : 'rgba(255, 245, 216, 0.30)' });
+
+      const el = document.createElement('button');
+      el.className = 'map-node sun ' + (ready ? 'ready' : 'sealed');
+      el.style.left = '50%';
+      el.style.top = '50%';
+      const dot = document.createElement('div'); dot.className = 'map-node-dot sun-dot';
+      const lbl = document.createElement('div'); lbl.className = 'map-node-label';
+      lbl.textContent = sys.sun.name;
+      const meta = document.createElement('div'); meta.className = 'map-node-meta';
+      meta.textContent = ready ? 'open' : 'sealed';
+      el.appendChild(dot); el.appendChild(lbl); el.appendChild(meta);
+      el.addEventListener('click', () => {
+        setStatus(ready ? sys.sun.ready_note : sys.sun.locked_note);
+      });
+      nodes().appendChild(el);
     };
 
     const showWorld = (sId, wId) => {
@@ -1564,62 +1884,156 @@
       view = 'world';
       renderWorld(sId, wId);
     };
+    const showSigil = (sId, wId, sigId) => {
+      worldId = wId;
+      sigilId = sigId;
+      view = 'sigil';
+      renderSigil(sId, wId, sigId);
+    };
+
+    // Sigil is "unlocked" when the previous sigil in the world is whole.
+    const isSigilUnlocked = (world, sigIdx) => {
+      if (sigIdx === 0) return true;
+      const prev = world.sigils[sigIdx - 1];
+      return prev && isSigilDone(prev);
+    };
 
     const renderWorld = (sId, wId) => {
+      stopAnim();
       const sys = GALAXY.systems.find(s => s.id === sId);
       const w = sys?.worlds.find(ww => ww.id === wId);
       if (!w) return renderGalaxy();
       applyPalette(paletteFor('REMEMBERED', sId, wId));
       clearMap();
-      const worldComplete = store.recoveredLines.length >= w.sigilCount;
+      const worldComplete = isWorldDone(w);
       setHeader('WORLD · ' + sys.name, w.name + (worldComplete ? '  ✓' : ''));
 
-      const n = w.sigilCount;
-      // Arrange sigils as a constellation: gentle spiral inside the play area
+      const sigils = w.sigils || [];
+      const n = sigils.length;
+      if (n === 0) {
+        const div = document.createElement('div');
+        div.className = 'map-node locked';
+        div.style.left = '50%'; div.style.top = '50%';
+        const lbl = document.createElement('div'); lbl.className = 'map-node-label';
+        lbl.textContent = w.note || 'no sigils yet — coming soon';
+        div.appendChild(lbl);
+        nodes().appendChild(div);
+        setStatus(w.mechanic ? 'mechanic: ' + w.mechanic : 'world content coming in a future update');
+        return;
+      }
+
+      // Constellation layout — concentric rings, outer = first sigil
+      // (matches the "outer is earlier" rule).
       const cx = 500, cy = 500;
       const positions = [];
       for (let i = 0; i < n; i++) {
         const t = i / Math.max(1, n - 1);
-        const angle = t * Math.PI * 2.4 - Math.PI / 2;
-        const radius = 120 + t * 280;
-        positions.push({
-          x: cx + Math.cos(angle) * radius,
-          y: cy + Math.sin(angle) * radius,
-        });
+        // t=0 → outer; t=1 → inner
+        const angle = (t * Math.PI * 1.8) - Math.PI / 2;
+        const radius = 380 - t * 260;
+        positions.push({ x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius });
       }
 
-      // Connect consecutive sigils with lines — recovered segments are
-      // bright gold; un-recovered are visible but dashed so the path
-      // reads clearly even before completion.
-      for (let i = 0; i < positions.length - 1; i++) {
+      // Connection lines between consecutive sigils
+      for (let i = 0; i < n - 1; i++) {
         const a = positions[i], b = positions[i + 1];
-        const recovered = store.recoveredLines.includes(i) && store.recoveredLines.includes(i + 1);
+        const bothDone = isSigilDone(sigils[i]) && isSigilDone(sigils[i + 1]);
         lineSvg(a.x, a.y, b.x, b.y, {
-          color: recovered ? 'rgba(255, 184, 107, 0.75)' : accentRgba(0.35),
-          width: recovered ? 2 : 1,
-          dash: recovered ? null : '6 8',
+          color: bothDone ? 'rgba(255, 184, 107, 0.75)' : accentRgba(0.30),
+          width: bothDone ? 2 : 1,
+          dash: bothDone ? null : '6 8',
         });
       }
 
-      // Render sigil buttons
+      // Sigil cluster buttons
       for (let i = 0; i < n; i++) {
-        const done = store.recoveredLines.includes(i);
-        const isNext = !done && i === (store.nextLevel || 0);
-        const locked = i > (store.nextLevel || 0) && !done;
+        const sig = sigils[i];
+        const done = isSigilDone(sig);
+        const unlocked = isSigilUnlocked(w, i);
         const cls = ['sigil-node'];
         if (done) cls.push('done');
-        else if (isNext) cls.push('next');
-        else if (locked) cls.push('locked');
+        else if (unlocked) cls.push('next');
+        else cls.push('locked');
         const b = document.createElement('button');
         b.className = cls.join(' ');
         b.style.left = (positions[i].x / 1000 * 100) + '%';
         b.style.top = (positions[i].y / 1000 * 100) + '%';
         b.textContent = String(i + 1).padStart(2, '0');
-        if (!locked) {
+        if (unlocked) {
+          const cx = positions[i].x / 1000, cy = positions[i].y / 1000;
+          b.addEventListener('click', () => zoomInto(cx, cy, () => showSigil(sId, wId, sig.id)));
+        } else {
+          b.disabled = true;
+        }
+        nodes().appendChild(b);
+      }
+
+      const remaining = n - sigils.filter(isSigilDone).length;
+      const statusEl = document.getElementById('map-status');
+      statusEl.classList.toggle('whole', worldComplete);
+      const status = worldComplete ? '✓ WORLD WHOLE — every sigil decoded · tap any to retrace' :
+                    remaining === n ? `mechanic: ${w.mechanic || 'tap a sigil to begin'}` :
+                    `${remaining} sigil${remaining === 1 ? '' : 's'} remaining`;
+      setStatus(status);
+    };
+
+    const renderSigil = (sId, wId, sigId) => {
+      stopAnim();
+      const sys = GALAXY.systems.find(s => s.id === sId);
+      const w = sys?.worlds.find(ww => ww.id === wId);
+      const sig = w?.sigils.find(x => x.id === sigId);
+      if (!sig) return renderWorld(sId, wId);
+      applyPalette(paletteFor('REMEMBERED', sId, wId, sigId));
+      clearMap();
+      const sigComplete = isSigilDone(sig);
+      setHeader('SIGIL · ' + w.name, sig.name + (sigComplete ? '  ✓' : ''));
+
+      const levels = sig.levels;
+      const n = levels.length;
+      const cx = 500, cy = 500;
+      const positions = [];
+      if (n === 1) {
+        positions.push({ x: cx, y: cy });
+      } else {
+        // Arrange sub-levels in a small ring
+        for (let i = 0; i < n; i++) {
+          const t = i / n;
+          const angle = t * Math.PI * 2 - Math.PI / 2;
+          positions.push({ x: cx + Math.cos(angle) * 200, y: cy + Math.sin(angle) * 200 });
+        }
+      }
+
+      // Connect consecutive sub-levels with lines
+      for (let i = 0; i < n - 1; i++) {
+        const a = positions[i], b = positions[i + 1];
+        const bothDone = store.recoveredLines.includes(levels[i]) &&
+                         store.recoveredLines.includes(levels[i + 1]);
+        lineSvg(a.x, a.y, b.x, b.y, {
+          color: bothDone ? 'rgba(255, 184, 107, 0.75)' : accentRgba(0.30),
+          width: bothDone ? 2 : 1,
+          dash: bothDone ? null : '6 8',
+        });
+      }
+
+      // Sub-level nodes
+      for (let i = 0; i < n; i++) {
+        const levelIdx = levels[i];
+        const done = store.recoveredLines.includes(levelIdx);
+        const prevDone = i === 0 || store.recoveredLines.includes(levels[i - 1]);
+        const cls = ['sigil-node'];
+        if (done) cls.push('done');
+        else if (prevDone) cls.push('next');
+        else cls.push('locked');
+        const b = document.createElement('button');
+        b.className = cls.join(' ');
+        b.style.left = (positions[i].x / 1000 * 100) + '%';
+        b.style.top = (positions[i].y / 1000 * 100) + '%';
+        b.textContent = String(levelIdx + 1).padStart(2, '0');
+        if (done || prevDone) {
           b.addEventListener('click', () => {
             closeMap();
             Audio.init(); Audio.resume();
-            startStory(i);
+            startStory(levelIdx);
           });
         } else {
           b.disabled = true;
@@ -1627,13 +2041,47 @@
         nodes().appendChild(b);
       }
 
-      const remaining = n - store.recoveredLines.length;
+      const remaining = n - levels.filter(i => store.recoveredLines.includes(i)).length;
       const statusEl = document.getElementById('map-status');
-      statusEl.classList.toggle('whole', worldComplete);
-      const status = worldComplete ? '✓ WORLD WHOLE — every sigil decoded · tap to retrace' :
-                    remaining === n ? 'tap the cyan sigil to begin' :
-                    `${remaining} fragment${remaining === 1 ? '' : 's'} remaining`;
+      statusEl.classList.toggle('whole', sigComplete);
+      const status = sigComplete ? '✓ SIGIL WHOLE — every level decoded · tap any to retrace' :
+                    remaining === n ? 'tap the cyan level to begin' :
+                    `${remaining} sub-level${remaining === 1 ? '' : 's'} remaining`;
       setStatus(status);
+    };
+
+    // Re-draw orbital connection lines between consecutive completed
+    // entries — called every frame so the "sigil" they form moves with
+    // the orbits.
+    const redrawConnections = (elapsed) => {
+      // Remove old connection elements (lines with data-conn="1")
+      const svgEl = svg();
+      const old = svgEl.querySelectorAll('line[data-conn="1"]');
+      old.forEach(o => o.remove());
+
+      const connect = (entities) => {
+        for (let i = 0; i < entities.length - 1; i++) {
+          const a = orbitalPos(entities[i].orbit, elapsed);
+          const b = orbitalPos(entities[i + 1].orbit, elapsed);
+          const ns = 'http://www.w3.org/2000/svg';
+          const el = document.createElementNS(ns, 'line');
+          el.setAttribute('x1', a.x * 1000); el.setAttribute('y1', a.y * 1000);
+          el.setAttribute('x2', b.x * 1000); el.setAttribute('y2', b.y * 1000);
+          el.setAttribute('stroke', 'rgba(255, 184, 107, 0.7)');
+          el.setAttribute('stroke-width', '2');
+          el.setAttribute('vector-effect', 'non-scaling-stroke');
+          el.setAttribute('data-conn', '1');
+          svgEl.appendChild(el);
+        }
+      };
+
+      if (view === 'galaxy') {
+        const done = GALAXY.systems.filter(isSolarDone);
+        connect(done);
+      } else if (view === 'solar' && sysId) {
+        const sys = GALAXY.systems.find(s => s.id === sysId);
+        if (sys) connect(sys.worlds.filter(isWorldDone));
+      }
     };
 
     const showGalaxy = () => { view = 'galaxy'; renderGalaxy(); };
@@ -1643,23 +2091,106 @@
       view = 'galaxy';
       applyPalette(paletteFor('REMEMBERED'));
       showScreens({ map: true });
+      resetTransform(false);
       renderGalaxy();
     };
 
+    // Pinch + pan + tap-to-not-click suppression on the map canvas
+    const initPanZoom = () => {
+      const canv = document.getElementById('map-canvas');
+      if (!canv || canv.dataset.bound === '1') return;
+      canv.dataset.bound = '1';
+
+      canv.addEventListener('pointerdown', (e) => {
+        // Don't capture if the user is pressing a zoom button itself
+        if (e.target.closest('.map-zoom-btn')) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        movedSinceDown = false;
+        if (pointers.size === 2) {
+          const ps = [...pointers.values()];
+          pinchStartDist = Math.hypot(ps[1].x - ps[0].x, ps[1].y - ps[0].y);
+          pinchStartScale = scale;
+        } else if (pointers.size === 1) {
+          panStartX = e.clientX; panStartY = e.clientY;
+          panOriginX = tx; panOriginY = ty;
+        }
+      }, { passive: true });
+
+      canv.addEventListener('pointermove', (e) => {
+        if (!pointers.has(e.pointerId)) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pointers.size === 2) {
+          const ps = [...pointers.values()];
+          const d = Math.hypot(ps[1].x - ps[0].x, ps[1].y - ps[0].y);
+          if (pinchStartDist > 0) {
+            scale = clamp(pinchStartScale * (d / pinchStartDist), SCALE_MIN, SCALE_MAX);
+            applyTransform(false);
+            movedSinceDown = true;
+            suppressClick = true;
+          }
+        } else if (pointers.size === 1) {
+          const dx = e.clientX - panStartX;
+          const dy = e.clientY - panStartY;
+          if (Math.abs(dx) > 6 || Math.abs(dy) > 6) {
+            tx = panOriginX + dx;
+            ty = panOriginY + dy;
+            applyTransform(false);
+            movedSinceDown = true;
+            suppressClick = true;
+          }
+        }
+      }, { passive: true });
+
+      const endPointer = (e) => {
+        pointers.delete(e.pointerId);
+        if (pointers.size === 0) {
+          // Briefly suppress the synthetic click that follows pointerup if user dragged
+          if (movedSinceDown) {
+            suppressClick = true;
+            setTimeout(() => { suppressClick = false; }, 50);
+          } else {
+            suppressClick = false;
+          }
+        }
+      };
+      canv.addEventListener('pointerup', endPointer, { passive: true });
+      canv.addEventListener('pointercancel', endPointer, { passive: true });
+
+      // Capture-phase click filter — blocks clicks on map-nodes after a drag/pinch
+      canv.addEventListener('click', (e) => {
+        if (suppressClick) { e.stopPropagation(); e.preventDefault(); }
+      }, true);
+
+      // Zoom buttons
+      document.getElementById('btn-zoom-in').addEventListener('click', () => setScale(scale * 1.35, true));
+      document.getElementById('btn-zoom-out').addEventListener('click', () => setScale(scale / 1.35, true));
+      document.getElementById('btn-zoom-reset').addEventListener('click', () => resetTransform(true));
+    };
+    initPanZoom();
+
     const back = () => {
-      if (view === 'world') {
-        // Going back from world to solar — restore solar palette
-        applyPalette(paletteFor('REMEMBERED', sysId));
-        showSolar(sysId);
+      if (view === 'sigil') {
+        zoomOut(() => {
+          applyPalette(paletteFor('REMEMBERED', sysId, worldId));
+          showWorld(sysId, worldId);
+        });
+      } else if (view === 'world') {
+        zoomOut(() => {
+          applyPalette(paletteFor('REMEMBERED', sysId));
+          showSolar(sysId);
+        });
       } else if (view === 'solar') {
-        applyPalette(paletteFor('REMEMBERED'));
-        showGalaxy();
+        zoomOut(() => {
+          applyPalette(paletteFor('REMEMBERED'));
+          showGalaxy();
+        });
       } else {
         closeMap();
       }
     };
 
     const closeMap = () => {
+      stopAnim();
       view = 'galaxy';
       applyPalette(paletteFor('REMEMBERED'));
       state = STATE.TITLE;
@@ -1671,6 +2202,7 @@
       if (view === 'galaxy') renderGalaxy();
       else if (view === 'solar') renderSolar(sysId);
       else if (view === 'world') renderWorld(sysId, worldId);
+      else if (view === 'sigil') renderSigil(sysId, worldId, sigilId);
     }};
   })();
 
