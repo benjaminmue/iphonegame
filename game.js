@@ -450,8 +450,11 @@
   let W = 0, H = 0, DPR = 1;
   const resize = () => {
     DPR = Math.min(window.devicePixelRatio || 1, 2.5);
-    W = window.innerWidth;
-    H = window.innerHeight;
+    // visualViewport reflects iOS Safari's URL bar visibility correctly;
+    // fall back to innerWidth/Height when not available.
+    const vv = window.visualViewport;
+    W = vv ? vv.width : window.innerWidth;
+    H = vv ? vv.height : window.innerHeight;
     canvas.width = Math.floor(W * DPR);
     canvas.height = Math.floor(H * DPR);
     canvas.style.width = W + 'px';
@@ -461,6 +464,9 @@
   };
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', () => setTimeout(resize, 80));
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', resize);
+  }
 
   // -------------------------------------------------------------------------
   // Game state
@@ -713,6 +719,12 @@
     G.tipText = buildTip(lvl.cfg);
     G.tipUntil = performance.now() + 3200;
     updateLevelLabel();
+    // Force a paint on the next animation frame in case iOS Safari is
+    // sitting on a stale canvas (we've occasionally seen the first
+    // post-mode-tap render skip on mobile Safari).
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => { try { render(); } catch (e) {} });
+    }
   };
 
   // -------------------------------------------------------------------------
@@ -920,14 +932,25 @@
     showScreens({ hud: true });
   };
 
+  // Clear leftover play state so a new mode never inherits stale fields
+  const clearPlayState = () => {
+    G.playWorldId = null;
+    G.playLevelIdx = null;
+    G.playSigilIdx = null;
+    G.lastGhost = null;
+    G.ghost = null;
+    G.traceSamples = [];
+    G.tipText = '';
+  };
+
   const startDaily = () => {
+    clearPlayState();
     G.mode = 'daily';
     G.levelIdx = 0;
     G.runMistakes = 0;
     const dateKey = todayKey();
     const seed = hashString('sigil-daily-' + dateKey);
     G.seededRng = mulberry32(seed);
-    // Daily gets a unique hue each day — colour is part of "today's signal"
     applyPalette(paletteFor('REMEMBERED', 'daily', dateKey));
     state = STATE.PLAYING;
     loadLevel(DAILY_CONFIG, G.seededRng);
@@ -935,12 +958,12 @@
   };
 
   const startEndless = (startIdx = 0) => {
+    clearPlayState();
     G.mode = 'endless';
     G.levelIdx = startIdx;
     G.sigilsThisRun = 0;
     G.runMistakes = 0;
     G.seededRng = null;
-    // Endless hue shifts every level — you "descend through colour"
     applyPalette(paletteFor('REMEMBERED', 'endless', null, 'endless-' + startIdx));
     state = STATE.PLAYING;
     loadLevel(generateEndlessConfig(startIdx));
@@ -1519,17 +1542,31 @@
     const bootTag = document.getElementById('boot-tag');
     if (bootTag) bootTag.textContent = store.complete ? 'ARTEFACT WHOLE' : 'ARTEFACT READY';
 
-    // Show/hide the post-completion mode-select tiles
+    // Title screen actions:
+    //   - BEGIN/CONTINUE button points to the next undone sigil (walks
+    //     HOMEKEEPER's world/level/sigil chain). Stays visible even after
+    //     the story is whole so the player can keep advancing in PRIME
+    //     levels 02-20 or moving on to DRIFT/CROSS/... when unlocked.
+    //   - Mode tiles (DAILY · ENDLESS · RETRACE) show only once the story
+    //     is whole.
     const modes = document.getElementById('modes');
     const beginBtn = document.getElementById('btn-begin');
-    if (store.complete) {
-      modes.hidden = false;
-      beginBtn.hidden = true;
-    } else {
-      modes.hidden = true;
+    const next = findNextUndoneSigil();
+    modes.hidden = !store.complete;
+    if (next) {
       beginBtn.hidden = false;
-      if (!store.seenTutorial && store.nextLevel === 0) beginBtn.textContent = 'BEGIN';
-      else beginBtn.textContent = `CONTINUE · SIGIL ${String(store.nextLevel + 1).padStart(2, '0')}`;
+      const totalDone = (store.doneSigils || []).length;
+      if (!store.seenTutorial && totalDone === 0) {
+        beginBtn.textContent = 'BEGIN';
+      } else {
+        const w = next.worldId.toUpperCase();
+        const l = String(next.levelIdx + 1).padStart(2, '0');
+        const s = String(next.sigilIdx + 1).padStart(2, '0');
+        beginBtn.textContent = `CONTINUE · ${w} · L${l} · S${s}`;
+      }
+    } else {
+      // No undone sigils — everything in HOMEKEEPER is whole
+      beginBtn.hidden = true;
     }
 
     // Mode tile stats
@@ -2003,6 +2040,34 @@
   // Compatibility wrappers for solar/galaxy rendering — operate on GALAXY entities
   const isWorldDone = (w) => isWorldCompleted(w.id);
   const isSolarDone = (sys) => (sys.worlds?.length || 0) > 0 && sys.worlds.every(isWorldDone);
+
+  // Find the next undone sigil the player can pick up. Walks HOMEKEEPER's
+  // worlds in order, respects unlock chain (world requires + level requires
+  // + sigil requires). Returns {worldId, levelIdx, sigilIdx} or null.
+  const findNextUndoneSigil = () => {
+    // Defined after GALAXY below — but GALAXY hoists fine because we read
+    // it at call time, not at definition time.
+    if (typeof GALAXY === 'undefined') return null;
+    const sys = GALAXY.systems.find(s => s.id === 'homekeeper');
+    if (!sys) return null;
+    for (const world of sys.worlds) {
+      // Walk worlds in declaration order
+      const reqs = world.requires;
+      const wUnlocked = world.unlocked || !reqs ||
+        (sys.worlds.find(w => w.id === reqs) && isWorldCompleted(reqs));
+      if (!wUnlocked) continue;
+      for (let l = 0; l < LEVELS_PER_WORLD; l++) {
+        if (!isLevelUnlocked(world.id, l)) break;
+        for (let s = 0; s < SIGILS_PER_LEVEL; s++) {
+          if (!isSigilUnlockedAt(world.id, l, s)) break;
+          if (!isSigilCompleted(world.id, l, s)) {
+            return { worldId: world.id, levelIdx: l, sigilIdx: s };
+          }
+        }
+      }
+    }
+    return null;
+  };
 
   // Migrate v2 (recoveredLines tied to PRIME · LEVEL 01) into the new
   // (world, level, sigil) coordinate system.
@@ -2747,7 +2812,11 @@
       store.seenTutorial = true; saveStore();
       startTutorial();
     } else {
-      startStory(store.nextLevel || 0);
+      // Smart continue — pick up at the next undone sigil anywhere in
+      // HOMEKEEPER (respecting unlock chain), not just PRIME LEVEL 01.
+      const next = findNextUndoneSigil();
+      if (next) startSigil(next.worldId, next.levelIdx, next.sigilIdx);
+      else startSigil('prime', 0, 0); // safety fallback
     }
   });
 
