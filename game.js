@@ -570,6 +570,33 @@
       path.push(best); seen.add(best); cur = best;
     }
 
+    // ×2 knot — insert duplicate path entries so certain stars get visited twice.
+    // Each knot picks a star already in path[] and inserts it again at a later
+    // position (not immediately adjacent — that would be a no-op).
+    const knots = Math.max(0, cfg.duplicates || 0);
+    for (let k = 0; k < knots && required.length >= 3; k++) {
+      // Prefer stars that are currently visited only once
+      const candidates = required.filter(idx => path.filter(p => p === idx).length === 1);
+      if (candidates.length === 0) break;
+      const pickIdx = candidates[Math.floor(rng() * candidates.length)];
+      // First occurrence index
+      const firstAt = path.indexOf(pickIdx);
+      // Insert at a position at least 2 steps later, before the end
+      const minInsert = firstAt + 2;
+      const maxInsert = path.length;
+      if (minInsert >= maxInsert) {
+        // Path too short; append at end
+        path.push(pickIdx);
+      } else {
+        const at = minInsert + Math.floor(rng() * (maxInsert - minInsert + 1));
+        path.splice(at, 0, pickIdx);
+      }
+    }
+
+    // Per-node use accounting: how many times each node appears in the path
+    nodes.forEach(n => { n.useCount = 0; n.requiredUses = 0; });
+    path.forEach(idx => { nodes[idx].requiredUses += 1; });
+
     // Red stars — placed away from path nodes, but possibly near path segments
     // (that's the point: the player must steer around them).
     // When cfg.redDrift, each red star orbits slowly — you have to time
@@ -614,6 +641,9 @@
     G.timeLeft = G.timeLimit;
     G.hintFade = lvl.cfg.hintFade || 0;
     G.hintAlpha = 1;
+    // No-hint mode: the dashed path is never drawn, BUT we flash the full
+    // path for 1 second on entry so the player gets a fleeting glimpse.
+    G.noHintFlash = lvl.cfg.noHint ? 1.0 : 0;
     G.mistakes = 0;
     G.flashAlpha = 0;
     G.successPhase = 0;
@@ -621,6 +651,15 @@
     G.particles.length = 0;
     G.nudge = 0;
     G.transitioning = false;
+    // Ghost of last attempt — if the last failed sigil matches this one,
+    // expose the previous trace as a faint dotted overlay (idea #1).
+    const sigilKeyCur = G.mode === 'sigil'
+      ? sigilKey(G.playWorldId, G.playLevelIdx, G.playSigilIdx) : null;
+    G.ghost = (G.lastGhost && G.lastGhost.key === sigilKeyCur) ? G.lastGhost.points : null;
+    G.traceSamples = [];
+    // Tip strip
+    G.tipText = buildTip(lvl.cfg);
+    G.tipUntil = performance.now() + 3200;
     updateLevelLabel();
   };
 
@@ -677,7 +716,8 @@
 
   const onCorrectHit = (nodeIdx) => {
     const node = G.nodes[nodeIdx];
-    node.hit = true;
+    node.useCount = (node.useCount || 0) + 1;
+    node.hit = node.requiredUses > 0 && node.useCount >= node.requiredUses;
     node.touchedAt = performance.now();
     G.progress += 1;
     const noteIdx = Math.min(G.progress - 1 + Math.floor(G.levelIdx / 2), TUNING.length - 1);
@@ -734,6 +774,17 @@
     G.transitioning = true;
     Audio.tone(80, 0.6, 'sine', 0.28, 0.001);
     vibrate([12, 80, 12]);
+    // Ghost-of-last-attempt: remember the trace so the next try shows it.
+    if (G.mode === 'sigil' && G.traceSamples && G.traceSamples.length > 4) {
+      // Down-sample to a manageable number of points
+      const step = Math.max(1, Math.floor(G.traceSamples.length / 80));
+      const pts = [];
+      for (let i = 0; i < G.traceSamples.length; i += step) pts.push(G.traceSamples[i]);
+      G.lastGhost = {
+        key: sigilKey(G.playWorldId, G.playLevelIdx, G.playSigilIdx),
+        points: pts,
+      };
+    }
     if (G.mode === 'endless') endEndlessRun(false);
     else if (G.mode === 'daily') endDailyAttempt(false);
     else endStoryAttempt(false);
@@ -917,9 +968,15 @@
     if (G.hintFade > 0) {
       G.hintAlpha = clamp(1 - Math.max(0, G.elapsed - G.hintFade) / 2.5, 0, 1);
     }
+    if (G.noHintFlash > 0) G.noHintFlash = Math.max(0, G.noHintFlash - dt);
     G.flashAlpha *= Math.pow(0.001, dt);
     G.nudge *= Math.pow(0.0008, dt);
     if (G.nudge < 0.1) G.nudge = 0;
+    // Capture finger trace samples while playing (used to draw ghost on retry)
+    if (G.touching && G.config) {
+      G.traceSamples.push({ x: G.fingerX, y: G.fingerY });
+      if (G.traceSamples.length > 240) G.traceSamples.shift();
+    }
     if (G.successPhase === 1) {
       G.successTimer += dt;
       const threshold = G.mode === 'endless' ? 1.0 : 1.6;
@@ -946,10 +1003,20 @@
   };
 
   const drawHintPath = () => {
-    if (G.hintAlpha < 0.001 || !G.path.length) return;
-    const a = G.hintAlpha;
+    if (!G.path.length) return;
+    const noHint = G.config && G.config.noHint;
+    // In no-hint mode the dashed path is normally invisible — except during
+    // the 1-second entry flash, where it's drawn briefly so the player gets
+    // a fleeting sense of the shape.
+    let alpha = G.hintAlpha;
+    if (noHint) {
+      // Flash starts at 1.0 and decays in 1s. Map to a 0..1 alpha curve.
+      const f = G.noHintFlash;
+      alpha = f > 0 ? Math.min(1, f * 1.2) : 0;
+    }
+    if (alpha < 0.001) return;
     ctx.save();
-    ctx.strokeStyle = accentRgba(0.18 * a);
+    ctx.strokeStyle = accentRgba(0.20 * alpha);
     ctx.lineWidth = 1.2;
     ctx.setLineDash([6, 8]);
     ctx.lineCap = 'round';
@@ -960,9 +1027,27 @@
     }
     ctx.stroke();
     ctx.setLineDash([]);
+    // Start star ring — kept even in no-hint mode (start star is always cyan).
     const first = G.nodes[G.path[0]];
-    ctx.strokeStyle = accentRgba(0.4 * a);
+    ctx.strokeStyle = accentRgba(noHint ? 0.55 : 0.4 * alpha);
     ctx.beginPath(); ctx.arc(first.x, first.y, 22, 0, TAU); ctx.stroke();
+    ctx.restore();
+  };
+
+  const drawGhost = () => {
+    if (!G.ghost || G.ghost.length < 2) return;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 245, 216, 0.18)';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([2, 5]);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (let i = 0; i < G.ghost.length; i++) {
+      const p = G.ghost[i];
+      if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
     ctx.restore();
   };
 
@@ -1029,13 +1114,17 @@
   const drawNodes = () => {
     const now = performance.now();
     const nextRequired = G.progress < G.path.length ? G.path[G.progress] : -1;
+    const knotVis = (G.config && G.config.knotVisibility) || 'badge';
     for (let i = 0; i < G.nodes.length; i++) {
       const n = G.nodes[i];
       const isNext = i === nextRequired;
-      const isCompleted = n.hit;
+      const isCompleted = n.requiredUses > 0 && n.useCount >= n.requiredUses;
+      const isPartial = n.requiredUses > 0 && n.useCount > 0 && !isCompleted;
+      const usesRemaining = Math.max(0, n.requiredUses - n.useCount);
       const sinceError = n.errorAt ? (now - n.errorAt) / 1000 : Infinity;
       const haloRadius = isNext ? 30 + Math.sin(G.elapsed * 4) * 3 : 18;
       const haloColor = isCompleted ? 'rgba(255, 216, 154, 0.45)' :
+                        isPartial ? 'rgba(255, 216, 154, 0.30)' :
                         isNext ? accentRgba(0.5) :
                         sinceError < 0.6 ? `rgba(255, 90, 107, ${0.6 * (1 - sinceError / 0.6)})` :
                         'rgba(255, 245, 216, 0.18)';
@@ -1046,6 +1135,7 @@
       ctx.beginPath(); ctx.arc(n.x, n.y, haloRadius, 0, TAU); ctx.fill();
 
       const coreColor = isCompleted ? C.starGlow :
+                        isPartial ? C.starGlow :
                         isNext ? C.accent :
                         sinceError < 0.6 ? C.warn : C.star;
       ctx.fillStyle = coreColor;
@@ -1057,8 +1147,30 @@
         ctx.beginPath(); ctx.arc(n.x, n.y, 16 + Math.sin(G.elapsed * 4) * 1.5, 0, TAU);
         ctx.stroke();
       }
-      // Subtle drift orbit indicator for moving stars (only unhit, only when hint visible)
-      if (n.drift && !n.hit && G.hintAlpha > 0.2) {
+
+      // ×2 knot indicator: a "×N" badge or concentric rings, gated by knotVisibility
+      if (n.requiredUses > 1 && usesRemaining > 0 && knotVis !== 'tip-only') {
+        if (knotVis === 'badge') {
+          // Small typographic badge above-right of the dot
+          ctx.fillStyle = `rgba(255, 184, 107, 0.85)`;
+          ctx.font = '600 9px -apple-system, system-ui, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(`×${n.requiredUses}`, n.x + 8, n.y - 10);
+        } else if (knotVis === 'rings') {
+          // One thin ring per use remaining
+          for (let r = 0; r < usesRemaining; r++) {
+            ctx.strokeStyle = `rgba(255, 184, 107, ${0.45 - r * 0.10})`;
+            ctx.lineWidth = 0.9;
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, 9 + r * 4, 0, TAU);
+            ctx.stroke();
+          }
+        }
+      }
+
+      // Subtle drift orbit indicator for moving stars (only undone, only when hint visible)
+      if (n.drift && !isCompleted && G.hintAlpha > 0.2) {
         ctx.strokeStyle = `rgba(160, 200, 255, ${0.10 * G.hintAlpha})`;
         ctx.lineWidth = 0.8;
         ctx.beginPath();
@@ -1096,6 +1208,7 @@
     ctx.translate(sx, sy);
     drawStars();
     if (state === STATE.PLAYING || state === STATE.TUTORIAL || state === STATE.PAUSED) {
+      drawGhost();
       drawHintPath();
       drawRedStars();
       drawCompletedPath();
@@ -1126,22 +1239,25 @@
   const handleHit = (x, y, isInitial) => {
     const hit = tryHitAt(x, y);
     if (hit === -1) return;
-    if (G.nodes[hit].hit) return; // already touched
+    const node = G.nodes[hit];
+    const isNext = G.progress < G.path.length && hit === G.path[G.progress];
 
-    if (isInitial) {
-      if (hit === G.path[0]) {
+    if (isNext) {
+      // Correct next star (works for first hit AND for revisits on ×2 knots)
+      if (isInitial) {
+        if (G.progress > 0) return; // can't re-start mid-path from a new touchdown
         G.touching = true;
-        onCorrectHit(hit);
-      } else if (G.nodes[hit].decoy || hit !== G.path[G.progress]) {
-        onWrongHit();
       }
-    } else {
-      if (G.progress < G.path.length && hit === G.path[G.progress]) {
-        onCorrectHit(hit);
-      } else if (G.nodes[hit].decoy || hit !== G.path[G.progress]) {
-        onWrongHit();
-      }
+      onCorrectHit(hit);
+      return;
     }
+
+    // Not the next required:
+    if (node.decoy) { onWrongHit(); return; }
+    // Already fully used? Treat as drag-through (silent ignore)
+    if (node.requiredUses > 0 && node.useCount >= node.requiredUses) return;
+    // Otherwise this is a required star but the wrong one
+    onWrongHit();
   };
 
   const onPointerDown = (e) => {
@@ -1223,16 +1339,35 @@
     const el = document.getElementById('hud-level');
     if (!el) return;
     if (G.mode === 'sigil') {
-      const w = (G.playWorldId || 'prime').toUpperCase();
       const l = String((G.playLevelIdx ?? 0) + 1).padStart(2, '0');
       const s = String((G.playSigilIdx ?? 0) + 1).padStart(2, '0');
-      el.textContent = `${w} · L${l} · S${s}`;
+      const name = getLevelName(G.playWorldId || 'prime', G.playLevelIdx ?? 0);
+      el.textContent = `L${l} · ${name} · S${s}`;
     } else if (G.mode === 'story') {
       el.textContent = `SIGIL ${String(G.levelIdx + 1).padStart(2, '0')} / ${String(STORY_LEVELS.length).padStart(2, '0')}`;
     } else if (G.mode === 'daily') {
       el.textContent = `DAILY · ${todayKey()}`;
     } else {
       el.textContent = `ENDLESS · ${String(G.sigilsThisRun).padStart(2, '0')}`;
+    }
+    // Show the tip strip
+    const tip = document.getElementById('sigil-tip');
+    if (tip && G.tipText && G.mode === 'sigil') {
+      tip.textContent = G.tipText;
+      tip.hidden = false;
+      tip.classList.remove('show');
+      // force reflow to restart animation
+      void tip.offsetWidth;
+      tip.classList.add('show');
+      setTimeout(() => {
+        if (tip.classList.contains('show')) {
+          tip.hidden = true;
+          tip.classList.remove('show');
+        }
+      }, 3300);
+    } else if (tip) {
+      tip.hidden = true;
+      tip.classList.remove('show');
     }
   };
 
@@ -1327,7 +1462,8 @@
       lineEl.textContent = MESSAGE_LINES[s];
       lineEl.classList.remove('procedural');
     } else {
-      numEl.textContent = `${w.toUpperCase()} · LEVEL ${levelNum} · SIGIL ${sigilNum}`;
+      const levelName = getLevelName(w, l);
+      numEl.textContent = `${w.toUpperCase()} · ${levelName} · SIGIL ${sigilNum}`;
       lineEl.textContent = isLevelCompleted(w, l)
         ? 'level whole. step inward.'
         : 'sigil decoded. tap next.';
@@ -1584,12 +1720,14 @@
   //   0–49   : stars + decoys
   //   50–69  : time pressure
   //   70–89  : hint fade
-  //   90–129 : ×2 knot (one star hit twice)
-  //   130–149: ×2 ×2 (two knots)
-  //   150+   : no hint
+  //   90–129 : ×2 knot — first introduced with visible "×2" badge
+  //   130–149: ×2 knot — rings replace badge (more abstract cue)
+  //   150–169: ×2 knot — only the tip strip mentions it; no per-star marker
+  //   170+   : no hint at all (with a 1s flash on entry)
   const getSigilCfg = (worldId, levelIdx, sigilIdx) => {
     if (worldId === 'prime' && levelIdx === 0 && sigilIdx < STORY_LEVELS.length) {
-      return STORY_LEVELS[sigilIdx];
+      // Story configs don't define duplicates/noHint — explicit defaults
+      return { ...STORY_LEVELS[sigilIdx], duplicates: 0, noHint: false, knotVisibility: 'badge' };
     }
     const m = WORLD_MECHANIC[worldId] || {};
     const diff = levelIdx * SIGILS_PER_LEVEL + sigilIdx;
@@ -1602,16 +1740,42 @@
       redCount: 0,
       duplicates: 0,
       noHint: false,
+      knotVisibility: 'badge', // 'badge' | 'rings' | 'tip-only'
     };
-    if (diff >= 50) cfg.time = Math.max(18, 55 - (diff - 50) * 0.5);
-    if (diff >= 70) cfg.hintFade = Math.max(2, 6 - (diff - 70) * 0.04);
+    if (diff >= 50)  cfg.time = Math.max(18, 55 - (diff - 50) * 0.5);
+    if (diff >= 70)  cfg.hintFade = Math.max(2, 6 - (diff - 70) * 0.04);
     if (diff >= 90)  cfg.duplicates = 1;
     if (diff >= 130) cfg.duplicates = 2;
-    if (diff >= 150) cfg.noHint = true;
+    if (diff >= 130) cfg.knotVisibility = 'rings';
+    if (diff >= 150) cfg.knotVisibility = 'tip-only';
+    if (diff >= 170) cfg.noHint = true;
     if (m.red) cfg.redCount = Math.min(3, 1 + Math.floor(diff / 40));
     if (m.redDrift) cfg.redDrift = true;
     if (m.hintFadeMul && cfg.hintFade > 0) cfg.hintFade *= m.hintFadeMul;
     return cfg;
+  };
+
+  // -------------------------------------------------------------------------
+  // Procedural level naming. "LEVEL 02 — THE PATIENT" etc.
+  // Deterministic (hash of worldId + levelIdx), so the same level always
+  // resolves to the same name. PRIME LEVEL 01 is hand-named "THE MESSAGE".
+  // -------------------------------------------------------------------------
+  const LEVEL_NAME_WORDS = [
+    'PATIENT', 'QUIET', 'BRIGHT', 'FALLEN', 'FORGOTTEN', 'BURIED', 'STILL',
+    'EMPTY', 'HUMMING', 'WIDE', 'LATE', 'FROZEN', 'WARM', 'SHALLOW', 'DEEP',
+    'FAINT', 'GRAVE', 'SACRED', 'BARELY', 'ENDLESS', 'WAITING', 'WAKING',
+    'BREATHING', 'GIVEN', 'TAKEN', 'HOLLOW', 'WHOLE', 'BROKEN', 'WORN',
+    'CLEAN', 'OLD', 'NEW', 'FAR', 'NEAR', 'LOST', 'KEPT', 'OPENED', 'CLOSED',
+    'KNOWN', 'UNKNOWN', 'NAMED', 'NAMELESS', 'ANCHORED', 'DRIFTING', 'TIDAL',
+    'LUNAR', 'SOLAR', 'GLOWING', 'FADED', 'TUNED', 'BROADCAST', 'WHISPERED',
+    'TURNING', 'COMING', 'GOING', 'HELD', 'UNTOLD', 'BORROWED', 'RETURNED',
+    'SLOW', 'SUDDEN', 'HONEST', 'CARELESS', 'CAREFUL', 'SILENT', 'SPOKEN',
+    'OFFERED', 'SHADED', 'CRACKED', 'HEARD', 'UNSEEN', 'WITNESSED',
+  ];
+  const getLevelName = (worldId, levelIdx) => {
+    if (worldId === 'prime' && levelIdx === 0) return 'THE MESSAGE';
+    const seed = hashU32(`${worldId}-level-${levelIdx}`);
+    return 'THE ' + LEVEL_NAME_WORDS[seed % LEVEL_NAME_WORDS.length];
   };
 
   // Map of mechanic flag → first-time intro shown to the player.
@@ -2192,7 +2356,8 @@
       clearMap();
       const levelComplete = isLevelCompleted(w.id, lvlIdx);
       const levelNum = String(lvlIdx + 1).padStart(2, '0');
-      setHeader('LEVEL · ' + w.name, `LEVEL ${levelNum}` + (levelComplete ? '  ✓' : ''));
+      const levelName = getLevelName(w.id, lvlIdx);
+      setHeader('LEVEL ' + levelNum + ' · ' + w.name, levelName + (levelComplete ? '  ✓' : ''));
 
       const N = SIGILS_PER_LEVEL;
       const cx = 500, cy = 500;

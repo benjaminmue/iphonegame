@@ -887,6 +887,39 @@ body { position: fixed; inset: 0; }
   text-shadow: 0 0 12px rgba(255, 184, 107, 0.5);
 }
 
+/* Sigil tip strip — appears just below the HUD when a sigil starts */
+.sigil-tip {
+  position: absolute;
+  top: calc(var(--safe-t) + 64px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(8, 7, 18, 0.72);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 10.5px;
+  letter-spacing: 0.20em;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  max-width: calc(100% - 32px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 9;
+  opacity: 0;
+}
+.sigil-tip.show {
+  animation: tipFade 3.2s ease both;
+}
+@keyframes tipFade {
+  0%   { opacity: 0; transform: translate(-50%, -8px); }
+  12%  { opacity: 1; transform: translate(-50%, 0); }
+  82%  { opacity: 1; }
+  100% { opacity: 0; transform: translate(-50%, -4px); }
+}
+
 .fragments {
   position: absolute;
   inset: 0;
