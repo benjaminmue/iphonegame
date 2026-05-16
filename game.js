@@ -743,13 +743,24 @@
   // Mode handlers
   // -------------------------------------------------------------------------
   const startStory = (levelIdx) => {
-    G.mode = 'story';
-    G.levelIdx = levelIdx;
+    // Legacy entry point: PRIME · LEVEL 01 · sigil <levelIdx>
+    startSigil('prime', 0, levelIdx);
+  };
+
+  // Play any (world, level, sigil) coordinate. Configs come from getSigilCfg,
+  // which returns the narrative STORY_LEVELS configs for PRIME · LEVEL 01 and
+  // procedural rising-difficulty configs everywhere else.
+  const startSigil = (worldId, lvlIdx, sigIdx) => {
+    G.mode = 'sigil';
+    G.playWorldId = worldId;
+    G.playLevelIdx = lvlIdx;
+    G.playSigilIdx = sigIdx;
+    G.levelIdx = sigIdx; // for narrative success screen back-compat
     G.runMistakes = 0;
     G.seededRng = null;
-    applyPalette(paletteFor('REMEMBERED', 'homekeeper', 'prime', levelIdx));
+    applyPalette(paletteFor('REMEMBERED', 'homekeeper', worldId, `${lvlIdx}:${sigIdx}`));
     state = STATE.PLAYING;
-    loadLevel(STORY_LEVELS[Math.min(levelIdx, STORY_LEVELS.length - 1)]);
+    loadLevel(getSigilCfg(worldId, lvlIdx, sigIdx));
     showScreens({ hud: true });
   };
 
@@ -781,23 +792,25 @@
   };
 
   const onStoryComplete = () => {
-    const lineIdx = G.levelIdx;
+    // Mark the sigil completed in the (world, level, sigil) coordinate
+    const w = G.playWorldId || 'prime';
+    const l = G.playLevelIdx ?? 0;
+    const s = G.playSigilIdx ?? G.levelIdx;
+    markSigilCompleted(w, l, s);
+
     let firstTime = false;
-    if (lineIdx < TOTAL_LINES && !store.recoveredLines.includes(lineIdx)) {
-      store.recoveredLines.push(lineIdx);
+    let isNarrative = (w === 'prime' && l === 0 && s < TOTAL_LINES);
+    if (isNarrative && !store.recoveredLines.includes(s)) {
+      store.recoveredLines.push(s);
       store.recoveredLines.sort((a, b) => a - b);
       firstTime = true;
       if (store.recoveredLines.length >= TOTAL_LINES && !store.complete) {
         store.complete = true;
       }
     }
-    store.nextLevel = Math.min(STORY_LEVELS.length - 1, Math.max(store.nextLevel, G.levelIdx + 1));
-    if (G.mistakes === 0) {
-      // Track best perfect-streak across story
-      store.bestPerfect = Math.max(store.bestPerfect || 0, 1);
-    }
+    if (G.mistakes === 0) store.bestPerfect = Math.max(store.bestPerfect || 0, 1);
     saveStore();
-    showStorySuccess(firstTime);
+    showStorySuccess(firstTime, isNarrative);
   };
 
   const onDailyComplete = () => {
@@ -1296,17 +1309,44 @@
     }
   };
 
-  const showStorySuccess = (firstTime) => {
-    const idx = G.levelIdx;
-    const line = MESSAGE_LINES[idx];
-    document.getElementById('success-num').textContent =
-      `FRAGMENT ${String(idx + 1).padStart(2, '0')} / ${String(TOTAL_LINES).padStart(2, '0')}`;
-    document.getElementById('success-line').textContent = line;
+  const showStorySuccess = (firstTime, isNarrative) => {
+    const w = G.playWorldId || 'prime';
+    const l = G.playLevelIdx ?? 0;
+    const s = G.playSigilIdx ?? G.levelIdx;
+    const levelNum = String(l + 1).padStart(2, '0');
+    const sigilNum = String(s + 1).padStart(2, '0');
+    const numEl = document.getElementById('success-num');
+    const lineEl = document.getElementById('success-line');
+    if (isNarrative && s < TOTAL_LINES) {
+      numEl.textContent = `FRAGMENT ${String(s + 1).padStart(2, '0')} / ${String(TOTAL_LINES).padStart(2, '0')}`;
+      lineEl.textContent = MESSAGE_LINES[s];
+      lineEl.classList.remove('procedural');
+    } else {
+      numEl.textContent = `${w.toUpperCase()} · LEVEL ${levelNum} · SIGIL ${sigilNum}`;
+      lineEl.textContent = isLevelCompleted(w, l)
+        ? 'level whole. step inward.'
+        : 'sigil decoded. tap next.';
+      lineEl.classList.add('procedural');
+    }
     document.getElementById('success-stats').textContent =
       G.mistakes === 0 ? 'TRACED CLEAN' : `${G.mistakes} mistake${G.mistakes === 1 ? '' : 's'}`;
     const nextBtn = document.getElementById('btn-success-next');
-    const isLast = idx >= STORY_LEVELS.length - 1;
-    nextBtn.textContent = isLast ? 'COMPLETE' : 'NEXT SIGIL';
+    // Determine what NEXT means: next sigil → next level → return to map
+    const nextSigil = s + 1;
+    if (nextSigil < SIGILS_PER_LEVEL) {
+      nextBtn.textContent = `SIGIL ${String(nextSigil + 1).padStart(2, '0')}`;
+      nextBtn._next = () => startSigil(w, l, nextSigil);
+    } else if (l + 1 < LEVELS_PER_WORLD && isLevelUnlocked(w, l + 1)) {
+      nextBtn.textContent = `LEVEL ${String(l + 2).padStart(2, '0')}`;
+      nextBtn._next = () => startSigil(w, l + 1, 0);
+    } else {
+      nextBtn.textContent = 'WORLD MAP';
+      nextBtn._next = () => {
+        state = STATE.TITLE;
+        refreshTitleStats();
+        showScreens({ title: true });
+      };
+    }
     state = STATE.SUCCESS;
     showScreens({ success: true });
   };
@@ -1508,11 +1548,101 @@
     },
   };
 
-  // Completion checks — derive solely from store.recoveredLines so the
-  // four-tier hierarchy is automatic.
-  const isSigilDone = (sig) => sig.levels.length > 0 && sig.levels.every(i => store.recoveredLines.includes(i));
-  const isWorldDone = (w) => (w.sigils?.length || 0) > 0 && w.sigils.every(isSigilDone);
-  const isSolarDone = (s) => (s.worlds?.length || 0) > 0 && s.worlds.every(isWorldDone);
+  // -------------------------------------------------------------------------
+  // World content shape
+  //   World  →  20 levels  →  10 sigils each  (sigil = one tracing puzzle)
+  //   PRIME · LEVEL 01 is the narrative chapter (uses the ten message lines)
+  //   PRIME · LEVEL 02..20 are procedural — playable, rising difficulty
+  //   Other worlds are stubbed for now (DRIFT/CROSS/ECHO/...); when their
+  //   mechanics ship, their procedural sigils inherit world-specific traits.
+  // -------------------------------------------------------------------------
+  const LEVELS_PER_WORLD = 20;
+  const SIGILS_PER_LEVEL = 10;
+
+  // World-specific mechanic flags applied to procedural sigil configs.
+  const WORLD_MECHANIC = {
+    prime:   {},
+    drift:   { drift: true },
+    cross:   { red: true },
+    echo:    { hintFadeMul: 0.4 },
+    mirror:  {},          // future mechanic
+    hold:    {},          // future mechanic
+    pulse:   {},          // future mechanic
+    whisper: {},          // future mechanic
+    fork:    {},          // future mechanic
+    entropy: { drift: true, red: true, hintFadeMul: 0.4 },
+  };
+
+  // Procedural sigil config for a (world, level, sigil) coordinate.
+  // Narrative override: PRIME · LEVEL 01 · sigils 0..9 = STORY_LEVELS.
+  const getSigilCfg = (worldId, levelIdx, sigilIdx) => {
+    if (worldId === 'prime' && levelIdx === 0 && sigilIdx < STORY_LEVELS.length) {
+      return STORY_LEVELS[sigilIdx];
+    }
+    const m = WORLD_MECHANIC[worldId] || {};
+    const diff = levelIdx * SIGILS_PER_LEVEL + sigilIdx;
+    const cfg = {
+      count: Math.min(10, 3 + Math.floor(diff / 12)),
+      decoys: Math.min(5, Math.floor(diff / 18)),
+      hintFade: diff < 6 ? 0 : Math.max(2, 6 - diff * 0.05),
+      time: diff < 10 ? 0 : Math.max(20, 50 - diff * 0.6),
+      drift: !!m.drift,
+      redCount: m.red ? Math.min(3, 1 + Math.floor(diff / 40)) : 0,
+    };
+    if (m.hintFadeMul && cfg.hintFade > 0) cfg.hintFade *= m.hintFadeMul;
+    return cfg;
+  };
+
+  // Generate the 10 sigil configs for a level
+  const getLevelSigils = (worldId, levelIdx) => {
+    const out = [];
+    for (let i = 0; i < SIGILS_PER_LEVEL; i++) out.push(getSigilCfg(worldId, levelIdx, i));
+    return out;
+  };
+
+  // Completion tracking: per-(world, level, sigil) flat key set
+  const sigilKey = (w, l, s) => `${w}:${l}:${s}`;
+  const isSigilCompleted = (w, l, s) => (store.doneSigils || []).includes(sigilKey(w, l, s));
+  const markSigilCompleted = (w, l, s) => {
+    if (!Array.isArray(store.doneSigils)) store.doneSigils = [];
+    const k = sigilKey(w, l, s);
+    if (!store.doneSigils.includes(k)) {
+      store.doneSigils.push(k);
+      saveStore();
+    }
+  };
+  const isLevelCompleted = (w, l) => {
+    for (let s = 0; s < SIGILS_PER_LEVEL; s++) {
+      if (!isSigilCompleted(w, l, s)) return false;
+    }
+    return true;
+  };
+  const isWorldCompleted = (w) => {
+    for (let l = 0; l < LEVELS_PER_WORLD; l++) {
+      if (!isLevelCompleted(w, l)) return false;
+    }
+    return true;
+  };
+  const isSigilUnlockedAt = (w, l, s) => s === 0 || isSigilCompleted(w, l, s - 1);
+  const isLevelUnlocked = (w, l) => l === 0 || isLevelCompleted(w, l - 1);
+  // Compatibility wrappers for solar/galaxy rendering — operate on GALAXY entities
+  const isWorldDone = (w) => isWorldCompleted(w.id);
+  const isSolarDone = (sys) => (sys.worlds?.length || 0) > 0 && sys.worlds.every(isWorldDone);
+
+  // Migrate v2 (recoveredLines tied to PRIME · LEVEL 01) into the new
+  // (world, level, sigil) coordinate system.
+  const migrateToSigilGrid = () => {
+    if (!Array.isArray(store.doneSigils)) store.doneSigils = [];
+    if (Array.isArray(store.recoveredLines) && store.recoveredLines.length > 0) {
+      let changed = false;
+      for (const i of store.recoveredLines) {
+        const k = sigilKey('prime', 0, i);
+        if (!store.doneSigils.includes(k)) { store.doneSigils.push(k); changed = true; }
+      }
+      if (changed) saveStore();
+    }
+  };
+  migrateToSigilGrid();
 
   // Order of completion — used to draw connection lines between completed
   // entities so the "sigil" they form follows orbital motion.
@@ -1826,9 +1956,14 @@
           const unlocked = isUnlockedWorld(sys, w);
           const done = isWorldDone(w);
           const pos = orbitalPos(w.orbit, t0);
+          // Per-world level progress for the meta line
+          let doneLvls = 0;
+          for (let li = 0; li < LEVELS_PER_WORLD; li++) {
+            if (isLevelCompleted(w.id, li)) doneLvls++;
+          }
           const meta = !unlocked ? 'sealed'
                      : done ? 'whole'
-                     : `${w.sigils.length} sigils`;
+                     : `${doneLvls} / ${LEVELS_PER_WORLD} levels`;
           const cls = done ? 'complete' : unlocked ? 'current' : 'locked';
           const lockMsg = !unlocked
             ? (w.requires
@@ -1884,20 +2019,14 @@
       view = 'world';
       renderWorld(sId, wId);
     };
-    const showSigil = (sId, wId, sigId) => {
+    const showLevel = (sId, wId, lvlIdx) => {
       worldId = wId;
-      sigilId = sigId;
-      view = 'sigil';
-      renderSigil(sId, wId, sigId);
+      sigilId = lvlIdx; // reusing var to track the open level idx
+      view = 'level';
+      renderLevel(sId, wId, lvlIdx);
     };
 
-    // Sigil is "unlocked" when the previous sigil in the world is whole.
-    const isSigilUnlocked = (world, sigIdx) => {
-      if (sigIdx === 0) return true;
-      const prev = world.sigils[sigIdx - 1];
-      return prev && isSigilDone(prev);
-    };
-
+    // WORLD VIEW — shows the 20 LEVELS of a world on a spiral, outer = Level 01
     const renderWorld = (sId, wId) => {
       stopAnim();
       const sys = GALAXY.systems.find(s => s.id === sId);
@@ -1905,51 +2034,44 @@
       if (!w) return renderGalaxy();
       applyPalette(paletteFor('REMEMBERED', sId, wId));
       clearMap();
-      const worldComplete = isWorldDone(w);
+      const worldComplete = isWorldCompleted(w.id);
       setHeader('WORLD · ' + sys.name, w.name + (worldComplete ? '  ✓' : ''));
 
-      const sigils = w.sigils || [];
-      const n = sigils.length;
-      if (n === 0) {
-        const div = document.createElement('div');
-        div.className = 'map-node locked';
-        div.style.left = '50%'; div.style.top = '50%';
-        const lbl = document.createElement('div'); lbl.className = 'map-node-label';
-        lbl.textContent = w.note || 'no sigils yet — coming soon';
-        div.appendChild(lbl);
-        nodes().appendChild(div);
-        setStatus(w.mechanic ? 'mechanic: ' + w.mechanic : 'world content coming in a future update');
-        return;
-      }
-
-      // Constellation layout — concentric rings, outer = first sigil
-      // (matches the "outer is earlier" rule).
+      const N = LEVELS_PER_WORLD;
       const cx = 500, cy = 500;
       const positions = [];
-      for (let i = 0; i < n; i++) {
-        const t = i / Math.max(1, n - 1);
-        // t=0 → outer; t=1 → inner
-        const angle = (t * Math.PI * 1.8) - Math.PI / 2;
-        const radius = 380 - t * 260;
-        positions.push({ x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius });
+      // 4 concentric rings of 5 levels each. Outer ring = Level 01-05.
+      // Each ring offset by a half-step so nodes never align radially.
+      const PER_RING = 5;
+      const RINGS = Math.ceil(N / PER_RING);
+      const RING_RADII = [430, 330, 230, 130];
+      for (let i = 0; i < N; i++) {
+        const ringIdx = Math.floor(i / PER_RING);
+        const inRing = i % PER_RING;
+        const r = RING_RADII[Math.min(ringIdx, RING_RADII.length - 1)];
+        const baseAngle = -Math.PI / 2;
+        const offset = ringIdx * (Math.PI / PER_RING); // half-step stagger
+        const angle = baseAngle + (inRing / PER_RING) * Math.PI * 2 + offset;
+        positions.push({ x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r });
       }
 
-      // Connection lines between consecutive sigils
-      for (let i = 0; i < n - 1; i++) {
+      // Connection spiral — bright between consecutive completed levels
+      for (let i = 0; i < N - 1; i++) {
         const a = positions[i], b = positions[i + 1];
-        const bothDone = isSigilDone(sigils[i]) && isSigilDone(sigils[i + 1]);
+        const bothDone = isLevelCompleted(w.id, i) && isLevelCompleted(w.id, i + 1);
         lineSvg(a.x, a.y, b.x, b.y, {
-          color: bothDone ? 'rgba(255, 184, 107, 0.75)' : accentRgba(0.30),
-          width: bothDone ? 2 : 1,
-          dash: bothDone ? null : '6 8',
+          color: bothDone ? 'rgba(255, 184, 107, 0.6)' : accentRgba(0.18),
+          width: bothDone ? 1.4 : 0.6,
+          dash: bothDone ? null : '5 8',
         });
       }
 
-      // Sigil cluster buttons
-      for (let i = 0; i < n; i++) {
-        const sig = sigils[i];
-        const done = isSigilDone(sig);
-        const unlocked = isSigilUnlocked(w, i);
+      // Level nodes
+      let doneCount = 0;
+      for (let i = 0; i < N; i++) {
+        const done = isLevelCompleted(w.id, i);
+        if (done) doneCount++;
+        const unlocked = isLevelUnlocked(w.id, i);
         const cls = ['sigil-node'];
         if (done) cls.push('done');
         else if (unlocked) cls.push('next');
@@ -1960,80 +2082,77 @@
         b.style.top = (positions[i].y / 1000 * 100) + '%';
         b.textContent = String(i + 1).padStart(2, '0');
         if (unlocked) {
-          const cx = positions[i].x / 1000, cy = positions[i].y / 1000;
-          b.addEventListener('click', () => zoomInto(cx, cy, () => showSigil(sId, wId, sig.id)));
+          const nx = positions[i].x / 1000, ny = positions[i].y / 1000;
+          b.addEventListener('click', () => zoomInto(nx, ny, () => showLevel(sId, wId, i)));
         } else {
           b.disabled = true;
         }
         nodes().appendChild(b);
       }
 
-      const remaining = n - sigils.filter(isSigilDone).length;
+      const remaining = N - doneCount;
       const statusEl = document.getElementById('map-status');
       statusEl.classList.toggle('whole', worldComplete);
-      const status = worldComplete ? '✓ WORLD WHOLE — every sigil decoded · tap any to retrace' :
-                    remaining === n ? `mechanic: ${w.mechanic || 'tap a sigil to begin'}` :
-                    `${remaining} sigil${remaining === 1 ? '' : 's'} remaining`;
+      const status = worldComplete ? '✓ WORLD WHOLE — every level decoded · tap any to retrace' :
+                    doneCount === 0 ? `mechanic: ${w.mechanic || 'tap LEVEL 01 to begin'}` :
+                    `${remaining} of ${N} levels remaining`;
       setStatus(status);
     };
 
-    const renderSigil = (sId, wId, sigId) => {
+    // LEVEL VIEW — shows the 10 SIGILS of a level on a ring
+    const renderLevel = (sId, wId, lvlIdx) => {
       stopAnim();
       const sys = GALAXY.systems.find(s => s.id === sId);
       const w = sys?.worlds.find(ww => ww.id === wId);
-      const sig = w?.sigils.find(x => x.id === sigId);
-      if (!sig) return renderWorld(sId, wId);
-      applyPalette(paletteFor('REMEMBERED', sId, wId, sigId));
+      if (!w) return renderWorld(sId, wId);
+      applyPalette(paletteFor('REMEMBERED', sId, wId, `l${lvlIdx}`));
       clearMap();
-      const sigComplete = isSigilDone(sig);
-      setHeader('SIGIL · ' + w.name, sig.name + (sigComplete ? '  ✓' : ''));
+      const levelComplete = isLevelCompleted(w.id, lvlIdx);
+      const levelNum = String(lvlIdx + 1).padStart(2, '0');
+      setHeader('LEVEL · ' + w.name, `LEVEL ${levelNum}` + (levelComplete ? '  ✓' : ''));
 
-      const levels = sig.levels;
-      const n = levels.length;
+      const N = SIGILS_PER_LEVEL;
       const cx = 500, cy = 500;
       const positions = [];
-      if (n === 1) {
-        positions.push({ x: cx, y: cy });
-      } else {
-        // Arrange sub-levels in a small ring
-        for (let i = 0; i < n; i++) {
-          const t = i / n;
-          const angle = t * Math.PI * 2 - Math.PI / 2;
-          positions.push({ x: cx + Math.cos(angle) * 200, y: cy + Math.sin(angle) * 200 });
-        }
+      for (let i = 0; i < N; i++) {
+        const t = i / N;
+        // outer = Sigil 01, slight inward spiral
+        const angle = t * Math.PI * 2 - Math.PI / 2;
+        const r = 340 - t * 80;
+        positions.push({ x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r });
       }
 
-      // Connect consecutive sub-levels with lines
-      for (let i = 0; i < n - 1; i++) {
+      // Connections
+      for (let i = 0; i < N - 1; i++) {
         const a = positions[i], b = positions[i + 1];
-        const bothDone = store.recoveredLines.includes(levels[i]) &&
-                         store.recoveredLines.includes(levels[i + 1]);
+        const bothDone = isSigilCompleted(w.id, lvlIdx, i) && isSigilCompleted(w.id, lvlIdx, i + 1);
         lineSvg(a.x, a.y, b.x, b.y, {
-          color: bothDone ? 'rgba(255, 184, 107, 0.75)' : accentRgba(0.30),
-          width: bothDone ? 2 : 1,
-          dash: bothDone ? null : '6 8',
+          color: bothDone ? 'rgba(255, 184, 107, 0.7)' : accentRgba(0.22),
+          width: bothDone ? 1.6 : 0.7,
+          dash: bothDone ? null : '5 8',
         });
       }
 
-      // Sub-level nodes
-      for (let i = 0; i < n; i++) {
-        const levelIdx = levels[i];
-        const done = store.recoveredLines.includes(levelIdx);
-        const prevDone = i === 0 || store.recoveredLines.includes(levels[i - 1]);
+      // Sigil nodes
+      let doneSig = 0;
+      for (let i = 0; i < N; i++) {
+        const done = isSigilCompleted(w.id, lvlIdx, i);
+        if (done) doneSig++;
+        const unlocked = isSigilUnlockedAt(w.id, lvlIdx, i);
         const cls = ['sigil-node'];
         if (done) cls.push('done');
-        else if (prevDone) cls.push('next');
+        else if (unlocked) cls.push('next');
         else cls.push('locked');
         const b = document.createElement('button');
         b.className = cls.join(' ');
         b.style.left = (positions[i].x / 1000 * 100) + '%';
         b.style.top = (positions[i].y / 1000 * 100) + '%';
-        b.textContent = String(levelIdx + 1).padStart(2, '0');
-        if (done || prevDone) {
+        b.textContent = String(i + 1).padStart(2, '0');
+        if (unlocked) {
           b.addEventListener('click', () => {
             closeMap();
             Audio.init(); Audio.resume();
-            startStory(levelIdx);
+            startSigil(w.id, lvlIdx, i);
           });
         } else {
           b.disabled = true;
@@ -2041,12 +2160,12 @@
         nodes().appendChild(b);
       }
 
-      const remaining = n - levels.filter(i => store.recoveredLines.includes(i)).length;
+      const remaining = N - doneSig;
       const statusEl = document.getElementById('map-status');
-      statusEl.classList.toggle('whole', sigComplete);
-      const status = sigComplete ? '✓ SIGIL WHOLE — every level decoded · tap any to retrace' :
-                    remaining === n ? 'tap the cyan level to begin' :
-                    `${remaining} sub-level${remaining === 1 ? '' : 's'} remaining`;
+      statusEl.classList.toggle('whole', levelComplete);
+      const status = levelComplete ? '✓ LEVEL WHOLE — every sigil decoded · tap any to retrace' :
+                    doneSig === 0 ? 'tap the cyan sigil to begin' :
+                    `${remaining} of ${N} sigils remaining`;
       setStatus(status);
     };
 
@@ -2169,7 +2288,7 @@
     initPanZoom();
 
     const back = () => {
-      if (view === 'sigil') {
+      if (view === 'level') {
         zoomOut(() => {
           applyPalette(paletteFor('REMEMBERED', sysId, worldId));
           showWorld(sysId, worldId);
@@ -2202,7 +2321,7 @@
       if (view === 'galaxy') renderGalaxy();
       else if (view === 'solar') renderSolar(sysId);
       else if (view === 'world') renderWorld(sysId, worldId);
-      else if (view === 'sigil') renderSigil(sysId, worldId, sigilId);
+      else if (view === 'level') renderLevel(sysId, worldId, sigilId);
     }};
   })();
 
@@ -2247,16 +2366,10 @@
     startStory(0); // restart story from the top
   });
 
-  document.getElementById('btn-success-next').addEventListener('click', () => {
+  document.getElementById('btn-success-next').addEventListener('click', (e) => {
     Audio.tick(660);
-    const isLast = G.levelIdx >= STORY_LEVELS.length - 1;
-    if (isLast) {
-      state = STATE.TITLE;
-      refreshTitleStats();
-      showScreens({ title: true });
-    } else {
-      startStory(G.levelIdx + 1);
-    }
+    const fn = e.currentTarget._next;
+    if (typeof fn === 'function') fn();
   });
   document.getElementById('btn-success-menu').addEventListener('click', () => {
     state = STATE.TITLE;
