@@ -66,6 +66,7 @@
     root.setProperty('--depth-accent', p.rgb);
     root.setProperty('--gate', p.css);
     root.setProperty('--accent', p.css);
+    if (Music.active) Music.setHue(p.hue);
   };
   const accentRgba = (a) => `rgba(${C.accentRgb}, ${a})`;
 
@@ -112,13 +113,17 @@
     const time = Math.max(18, 36 - idx * 1.4);
     const drift = idx >= 4;
     const redCount = idx >= 8 ? Math.min(3, 1 + Math.floor((idx - 8) / 4)) : 0;
-    return { count, decoys, hintFade, time, drift, redCount };
+    // Moving red stars enter the field once you're deep enough to handle them.
+    const redDrift = idx >= 14;
+    return { count, decoys, hintFade, time, drift, redCount, redDrift };
   };
 
   // Daily uses date as seed; config is fixed but feels different daily
-  // because positions, decoys, and red star locations vary deterministically
+  // because positions, decoys, and red star locations vary deterministically.
+  // The daily red star drifts — it's part of "today's challenge".
   const DAILY_CONFIG = {
-    count: 6, decoys: 2, hintFade: 3.5, time: 40, drift: true, redCount: 1,
+    count: 6, decoys: 2, hintFade: 3.5, time: 40,
+    drift: true, redCount: 1, redDrift: true,
   };
 
   // -------------------------------------------------------------------------
@@ -264,7 +269,152 @@
     };
     const error = () => tone(110, 0.18, 'square', 0.12, 0.001);
     const tick = (f, vol = 0.07) => tone(f, 0.07, 'triangle', vol, 0.001);
-    return { init, resume, tone, pluck, bell, error, tick };
+    return { init, resume, tone, pluck, bell, error, tick, get ctx() { return actx; },
+             get master() { return master; } };
+  })();
+
+  // -------------------------------------------------------------------------
+  // Dynamic ambient music — generative drone whose fundamental tracks the
+  // current world's hue. Layers: fundamental + perfect fifth + two octaves,
+  // a slow LFO breath, and a low-rate random "wind chime" sparkle.
+  // -------------------------------------------------------------------------
+  const Music = (() => {
+    let oscNodes = [];     // [{osc, gain, freq}]
+    let lfo = null, lfoGain = null;
+    let bus = null;        // music master gain
+    let active = false;
+    let currentHue = 190;
+    let sparkleTimer = null;
+
+    const ensureBus = () => {
+      if (bus) return true;
+      const ctx = Audio.ctx;
+      if (!ctx) return false;
+      bus = ctx.createGain();
+      bus.gain.value = 0;
+      bus.connect(ctx.destination);
+      return true;
+    };
+
+    const hueToFundamental = (hue) => {
+      // Map hue to a soft, low fundamental — C2 to C3 range.
+      // Semitones 0..12, then up an octave for richness if hue is high.
+      const baseHz = 65.41; // C2
+      const semis = (hue / 360) * 12;
+      return baseHz * Math.pow(2, semis / 12);
+    };
+
+    const harmonicsFor = (fund) => [
+      fund,           // root
+      fund * 1.5,     // perfect fifth
+      fund * 2,       // octave
+      fund * 3,       // octave + fifth
+    ];
+
+    const start = (hue) => {
+      if (!ensureBus() || !store.sound || active) return;
+      const ctx = Audio.ctx;
+      const t = ctx.currentTime;
+      active = true;
+      if (typeof hue === 'number') currentHue = hue;
+
+      const fund = hueToFundamental(currentHue);
+      const freqs = harmonicsFor(fund);
+      oscNodes = freqs.map((freq, i) => {
+        const o = ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.value = freq;
+        const g = ctx.createGain();
+        const vol = 0.05 / (i + 1.2);
+        g.gain.value = 0;
+        g.gain.linearRampToValueAtTime(vol, t + 5);
+        o.connect(g);
+        g.connect(bus);
+        o.start();
+        return { osc: o, gain: g, freq };
+      });
+
+      // Slow LFO modulating bus amplitude — "breath"
+      lfo = ctx.createOscillator();
+      lfo.type = 'sine';
+      lfo.frequency.value = 0.07;
+      lfoGain = ctx.createGain();
+      lfoGain.gain.value = 0.18;
+      lfo.connect(lfoGain);
+      lfoGain.connect(bus.gain);
+      lfo.start();
+
+      bus.gain.cancelScheduledValues(t);
+      bus.gain.setValueAtTime(0, t);
+      bus.gain.linearRampToValueAtTime(0.5, t + 5);
+
+      // Wind chime sparkle — rare bell tone tuned to the harmonic
+      const sparkle = () => {
+        if (!active) return;
+        if (store.sound && Audio.ctx) {
+          const sparkFreq = freqs[2] * (Math.random() < 0.5 ? 2 : 3);
+          const tt = Audio.ctx.currentTime;
+          const o = Audio.ctx.createOscillator();
+          const g = Audio.ctx.createGain();
+          o.type = 'sine';
+          o.frequency.value = sparkFreq;
+          g.gain.setValueAtTime(0.0001, tt);
+          g.gain.exponentialRampToValueAtTime(0.06, tt + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.0001, tt + 1.4);
+          o.connect(g); g.connect(bus);
+          o.start(tt); o.stop(tt + 1.5);
+        }
+        sparkleTimer = setTimeout(sparkle, 4000 + Math.random() * 8000);
+      };
+      sparkleTimer = setTimeout(sparkle, 3000 + Math.random() * 4000);
+    };
+
+    const setHue = (hue) => {
+      currentHue = hue;
+      if (!active || !Audio.ctx) return;
+      const t = Audio.ctx.currentTime;
+      const fund = hueToFundamental(hue);
+      const freqs = harmonicsFor(fund);
+      oscNodes.forEach((n, i) => {
+        try {
+          n.osc.frequency.cancelScheduledValues(t);
+          n.osc.frequency.setValueAtTime(n.osc.frequency.value, t);
+          n.osc.frequency.exponentialRampToValueAtTime(freqs[i], t + 3);
+          n.freq = freqs[i];
+        } catch {}
+      });
+    };
+
+    const setVolume = (v, fadeSec = 0.6) => {
+      if (!bus || !Audio.ctx) return;
+      const t = Audio.ctx.currentTime;
+      bus.gain.cancelScheduledValues(t);
+      bus.gain.setValueAtTime(bus.gain.value, t);
+      bus.gain.linearRampToValueAtTime(v, t + fadeSec);
+    };
+
+    const stop = () => {
+      if (!active) return;
+      const ctx = Audio.ctx;
+      if (!ctx) { active = false; return; }
+      const t = ctx.currentTime;
+      active = false;
+      if (sparkleTimer) { clearTimeout(sparkleTimer); sparkleTimer = null; }
+      bus.gain.cancelScheduledValues(t);
+      bus.gain.setValueAtTime(bus.gain.value, t);
+      bus.gain.linearRampToValueAtTime(0, t + 1.5);
+      const localOscs = oscNodes; const localLfo = lfo;
+      oscNodes = []; lfo = null; lfoGain = null;
+      setTimeout(() => {
+        localOscs.forEach(n => { try { n.osc.stop(); } catch {} });
+        if (localLfo) { try { localLfo.stop(); } catch {} }
+      }, 1600);
+    };
+
+    return {
+      start, stop, setHue, setVolume,
+      get active() { return active; },
+    };
   })();
 
   // -------------------------------------------------------------------------
@@ -421,7 +571,9 @@
     }
 
     // Red stars — placed away from path nodes, but possibly near path segments
-    // (that's the point: the player must steer around them)
+    // (that's the point: the player must steer around them).
+    // When cfg.redDrift, each red star orbits slowly — you have to time
+    // your stroke around moving hazards.
     const redStars = [];
     const redCount = cfg.redCount || 0;
     for (let i = 0; i < redCount; i++) {
@@ -429,13 +581,20 @@
       for (let tries = 0; tries < 80 && !ok; tries++) {
         x = r(margin + 12, W - margin - 12);
         y = r(PLAY_TOP + margin + 12, H - PLAY_BOTTOM - margin - 12);
-        // Keep red stars away from node centers so they don't sit on a target
         const tooClose = nodes.some(n => dist(n.baseX, n.baseY, x, y) < 56);
-        // And away from each other
         const tooClose2 = redStars.some(rr => dist(rr.x, rr.y, x, y) < 90);
         ok = !tooClose && !tooClose2;
       }
-      redStars.push({ x, y, pulse: rng() * TAU });
+      const red = { x, y, baseX: x, baseY: y, pulse: rng() * TAU };
+      if (cfg.redDrift) {
+        red.drift = {
+          cx: x, cy: y,
+          radius: 24 + rng() * 30,
+          speed: 0.10 + rng() * 0.18, // slower than nodes so the player can plan
+          phase: rng() * TAU,
+        };
+      }
+      redStars.push(red);
     }
 
     return { nodes, path, redStars, cfg };
@@ -498,6 +657,14 @@
         d.phase += d.speed * dt;
         n.x = d.cx + Math.cos(d.phase) * d.radius;
         n.y = d.cy + Math.sin(d.phase) * d.radius;
+      }
+    }
+    for (const r of G.redStars) {
+      if (r.drift) {
+        const d = r.drift;
+        d.phase += d.speed * dt;
+        r.x = d.cx + Math.cos(d.phase) * d.radius;
+        r.y = d.cy + Math.sin(d.phase) * d.radius;
       }
     }
   };
@@ -823,18 +990,24 @@
   const drawRedStars = () => {
     for (const r of G.redStars) {
       r.pulse += 0.04;
+      // Drift orbit indicator — shows where the red star will travel
+      if (r.drift && G.hintAlpha > 0.05) {
+        ctx.strokeStyle = `rgba(255, 90, 107, ${0.10 * G.hintAlpha})`;
+        ctx.lineWidth = 0.6;
+        ctx.beginPath();
+        ctx.arc(r.drift.cx, r.drift.cy, r.drift.radius, 0, TAU);
+        ctx.stroke();
+      }
       const halo = ctx.createRadialGradient(r.x, r.y, 0, r.x, r.y, RED_THRESHOLD + 6);
       halo.addColorStop(0, 'rgba(255, 90, 107, 0.35)');
       halo.addColorStop(1, 'rgba(255, 90, 107, 0)');
       ctx.fillStyle = halo;
       ctx.beginPath(); ctx.arc(r.x, r.y, RED_THRESHOLD + 6, 0, TAU); ctx.fill();
-      // danger ring
       ctx.strokeStyle = `rgba(255, 90, 107, ${0.45 + Math.sin(r.pulse) * 0.15})`;
       ctx.lineWidth = 1;
       ctx.setLineDash([3, 4]);
       ctx.beginPath(); ctx.arc(r.x, r.y, RED_THRESHOLD, 0, TAU); ctx.stroke();
       ctx.setLineDash([]);
-      // core
       ctx.fillStyle = C.red;
       ctx.beginPath(); ctx.arc(r.x, r.y, 3, 0, TAU); ctx.fill();
     }
@@ -1272,6 +1445,7 @@
       el.setAttribute('stroke', opts.color || 'rgba(241, 234, 216, 0.12)');
       el.setAttribute('stroke-width', opts.width || 0.6);
       if (opts.dash) el.setAttribute('stroke-dasharray', opts.dash);
+      el.setAttribute('vector-effect', 'non-scaling-stroke');
       svg().appendChild(el);
     };
 
@@ -1397,7 +1571,8 @@
       if (!w) return renderGalaxy();
       applyPalette(paletteFor('REMEMBERED', sId, wId));
       clearMap();
-      setHeader('WORLD · ' + sys.name, w.name);
+      const worldComplete = store.recoveredLines.length >= w.sigilCount;
+      setHeader('WORLD · ' + sys.name, w.name + (worldComplete ? '  ✓' : ''));
 
       const n = w.sigilCount;
       // Arrange sigils as a constellation: gentle spiral inside the play area
@@ -1413,13 +1588,16 @@
         });
       }
 
-      // Connect consecutive sigils with faint lines
+      // Connect consecutive sigils with lines — recovered segments are
+      // bright gold; un-recovered are visible but dashed so the path
+      // reads clearly even before completion.
       for (let i = 0; i < positions.length - 1; i++) {
         const a = positions[i], b = positions[i + 1];
         const recovered = store.recoveredLines.includes(i) && store.recoveredLines.includes(i + 1);
         lineSvg(a.x, a.y, b.x, b.y, {
-          color: recovered ? 'rgba(255, 184, 107, 0.5)' : 'rgba(241, 234, 216, 0.08)',
-          width: recovered ? 1.4 : 0.6,
+          color: recovered ? 'rgba(255, 184, 107, 0.75)' : accentRgba(0.35),
+          width: recovered ? 2 : 1,
+          dash: recovered ? null : '6 8',
         });
       }
 
@@ -1450,7 +1628,9 @@
       }
 
       const remaining = n - store.recoveredLines.length;
-      const status = store.complete ? 'world whole — tap any sigil to retrace' :
+      const statusEl = document.getElementById('map-status');
+      statusEl.classList.toggle('whole', worldComplete);
+      const status = worldComplete ? '✓ WORLD WHOLE — every sigil decoded · tap to retrace' :
                     remaining === n ? 'tap the cyan sigil to begin' :
                     `${remaining} fragment${remaining === 1 ? '' : 's'} remaining`;
       setStatus(status);
@@ -1500,6 +1680,7 @@
   document.getElementById('btn-begin').addEventListener('click', () => {
     Audio.init(); Audio.resume();
     Audio.bell([392, 523.25, 659.25], 0.10);
+    Music.start(C.accentHue);
     vibrate([4, 18, 4]);
     if (!store.seenTutorial) {
       store.seenTutorial = true; saveStore();
@@ -1518,16 +1699,19 @@
   document.getElementById('mode-daily').addEventListener('click', () => {
     Audio.init(); Audio.resume();
     Audio.tick(660);
+    Music.start(C.accentHue);
     startDaily();
   });
   document.getElementById('mode-endless').addEventListener('click', () => {
     Audio.init(); Audio.resume();
     Audio.tick(660);
+    Music.start(C.accentHue);
     startEndless(0);
   });
   document.getElementById('mode-replay').addEventListener('click', () => {
     Audio.init(); Audio.resume();
     Audio.tick(660);
+    Music.start(C.accentHue);
     startStory(0); // restart story from the top
   });
 
@@ -1596,6 +1780,7 @@
 
   document.getElementById('btn-map').addEventListener('click', () => {
     Audio.init(); Audio.resume(); Audio.tick(523.25, 0.08);
+    Music.start(C.accentHue);
     Map.open();
   });
   document.getElementById('btn-map-back').addEventListener('click', () => Map.back());
@@ -1606,10 +1791,12 @@
     state = STATE.PAUSED;
     showScreens({ pause: true, hud: true });
     Audio.tone(330, 0.18, 'triangle', 0.10, 0.001);
+    Music.setVolume(0.18);
   });
   document.getElementById('btn-resume').addEventListener('click', () => {
     state = STATE.PLAYING;
     showScreens({ hud: true });
+    Music.setVolume(0.5);
   });
   document.getElementById('btn-restart').addEventListener('click', () => {
     if (G.mode === 'story') startStory(G.levelIdx);
@@ -1629,7 +1816,12 @@
   };
   soundBtn.addEventListener('click', () => {
     store.sound = !store.sound; saveStore(); refreshSoundBtn();
-    if (store.sound) { Audio.init(); Audio.resume(); Audio.tick(660); }
+    if (store.sound) {
+      Audio.init(); Audio.resume(); Audio.tick(660);
+      Music.start(C.accentHue);
+    } else {
+      Music.stop();
+    }
   });
 
   document.addEventListener('visibilitychange', () => {

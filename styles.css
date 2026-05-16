@@ -801,6 +801,13 @@ body { position: fixed; inset: 0; }
   color: var(--ink-faint);
   padding: 6px 0;
   min-height: 16px;
+  transition: color 300ms ease;
+}
+.map-status.whole {
+  color: var(--warm);
+  font-size: 12px;
+  letter-spacing: 0.26em;
+  text-shadow: 0 0 12px rgba(255, 184, 107, 0.5);
 }
 
 .fragments {

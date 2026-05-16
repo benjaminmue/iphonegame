@@ -13,7 +13,7 @@
   <meta name="description" content="SIGIL — a strange artefact found inside the phone." />
   <link rel="icon" href="data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'&gt;&lt;circle cx='8' cy='10' r='2.5' fill='%23fff5d8'/&gt;&lt;circle cx='24' cy='10' r='2.5' fill='%235af0ff'/&gt;&lt;circle cx='16' cy='24' r='2.5' fill='%23fff5d8'/&gt;&lt;path d='M8 10 L24 10 L16 24 Z' stroke='%23fff5d8' stroke-width='1' fill='none' opacity='.6'/&gt;&lt;/svg&gt;" />
   <title>SIGIL</title>
-  <link rel="stylesheet" href="styles.css?v=8" />
+  <link rel="stylesheet" href="styles.css?v=9" />
 </head>
 <body>
   <main id="stage" aria-label="SIGIL game stage">
@@ -106,7 +106,7 @@
         <button class="map-nav" id="btn-map-close" aria-label="Close">✕</button>
       </header>
       <div class="map-canvas">
-        <svg class="map-svg" id="map-svg" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+        <svg class="map-svg" id="map-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true"></svg>
         <div class="map-nodes" id="map-nodes"></div>
       </div>
       <div class="map-status" id="map-status"></div>
@@ -210,6 +210,6 @@
     </section>
   </main>
 
-  <script src="game.js?v=8" defer></script>
+  <script src="game.js?v=9" defer></script>
 </body>
 </html>
