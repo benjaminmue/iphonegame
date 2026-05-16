@@ -18,7 +18,8 @@
   --warn: #ff5a6b;
   --line: rgba(241, 234, 216, 0.08);
   --line-strong: rgba(241, 234, 216, 0.18);
-  --depth-accent: 90, 240, 255; /* JS shifts cyan → magenta as you descend */
+  --depth-accent: 90, 240, 255; /* JS shifts hue per galaxy/solar/world */
+  --accent: hsl(190, 75%, 65%);
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-l: env(safe-area-inset-left, 0px);

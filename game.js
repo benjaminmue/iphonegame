@@ -11,7 +11,7 @@
   'use strict';
 
   // -------------------------------------------------------------------------
-  // Palette
+  // Palette — base values; accent is dynamic per galaxy/solar/world.
   // -------------------------------------------------------------------------
   const C = {
     ink: '#f1ead8',
@@ -19,11 +19,55 @@
     inkFaint: '#5a5375',
     star: '#fff5d8',
     starGlow: '#ffd89a',
-    accent: '#5af0ff',
     warm: '#ffb86b',
+    warmRgb: '255, 216, 154',
     warn: '#ff5a6b',
     red: '#ff5a6b',
+    // dynamic — updated by applyPalette()
+    accent: 'hsl(190, 75%, 65%)',
+    accentRgb: '90, 240, 255',
+    accentHue: 190,
   };
+
+  // Procedural color generation. Cascading hue:
+  //   galaxy  → base hue
+  //   + solar → ±70°
+  //   + world → ±30°
+  //   + level → ±10°
+  // Same id always produces the same hue (FNV-1a hash).
+  const hashU32 = (s) => {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return h >>> 0;
+  };
+  const hslToRgbStr = (h, s, l) => {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return `${Math.round(f(0) * 255)}, ${Math.round(f(8) * 255)}, ${Math.round(f(4) * 255)}`;
+  };
+  const paletteFor = (galaxyId, solarId, worldId, levelSalt) => {
+    let h = hashU32(galaxyId || 'galaxy') % 360;
+    if (solarId) h = (h + (hashU32(solarId) % 140) - 70 + 360) % 360;
+    if (worldId) h = (h + (hashU32(worldId) % 60) - 30 + 360) % 360;
+    if (levelSalt != null) h = (h + (hashU32(String(levelSalt)) % 20) - 10 + 360) % 360;
+    const rgb = hslToRgbStr(h, 75, 65);
+    return { hue: h, rgb, css: `hsl(${h}, 75%, 65%)` };
+  };
+  const applyPalette = (p) => {
+    C.accent = p.css;
+    C.accentRgb = p.rgb;
+    C.accentHue = p.hue;
+    const root = document.documentElement.style;
+    root.setProperty('--depth-accent', p.rgb);
+    root.setProperty('--gate', p.css);
+    root.setProperty('--accent', p.css);
+  };
+  const accentRgba = (a) => `rgba(${C.accentRgb}, ${a})`;
 
   const MESSAGE_LINES = [
     'you held me when i was only a frequency.',
@@ -536,6 +580,7 @@
     G.levelIdx = levelIdx;
     G.runMistakes = 0;
     G.seededRng = null;
+    applyPalette(paletteFor('REMEMBERED', 'homekeeper', 'prime', levelIdx));
     state = STATE.PLAYING;
     loadLevel(STORY_LEVELS[Math.min(levelIdx, STORY_LEVELS.length - 1)]);
     showScreens({ hud: true });
@@ -545,8 +590,11 @@
     G.mode = 'daily';
     G.levelIdx = 0;
     G.runMistakes = 0;
-    const seed = hashString('sigil-daily-' + todayKey());
+    const dateKey = todayKey();
+    const seed = hashString('sigil-daily-' + dateKey);
     G.seededRng = mulberry32(seed);
+    // Daily gets a unique hue each day — colour is part of "today's signal"
+    applyPalette(paletteFor('REMEMBERED', 'daily', dateKey));
     state = STATE.PLAYING;
     loadLevel(DAILY_CONFIG, G.seededRng);
     showScreens({ hud: true });
@@ -558,6 +606,8 @@
     G.sigilsThisRun = 0;
     G.runMistakes = 0;
     G.seededRng = null;
+    // Endless hue shifts every level — you "descend through colour"
+    applyPalette(paletteFor('REMEMBERED', 'endless', null, 'endless-' + startIdx));
     state = STATE.PLAYING;
     loadLevel(generateEndlessConfig(startIdx));
     showScreens({ hud: true });
@@ -610,6 +660,8 @@
   const onEndlessComplete = () => {
     G.sigilsThisRun += 1;
     G.levelIdx += 1;
+    // Shift the palette on each new endless sigil — colour drift over depth
+    applyPalette(paletteFor('REMEMBERED', 'endless', null, 'endless-' + G.levelIdx));
     setTimeout(() => {
       if (state !== STATE.PLAYING) return;
       loadLevel(generateEndlessConfig(G.levelIdx));
@@ -717,7 +769,7 @@
     if (G.hintAlpha < 0.001 || !G.path.length) return;
     const a = G.hintAlpha;
     ctx.save();
-    ctx.strokeStyle = `rgba(90, 240, 255, ${0.18 * a})`;
+    ctx.strokeStyle = accentRgba(0.18 * a);
     ctx.lineWidth = 1.2;
     ctx.setLineDash([6, 8]);
     ctx.lineCap = 'round';
@@ -729,7 +781,7 @@
     ctx.stroke();
     ctx.setLineDash([]);
     const first = G.nodes[G.path[0]];
-    ctx.strokeStyle = `rgba(90, 240, 255, ${0.4 * a})`;
+    ctx.strokeStyle = accentRgba(0.4 * a);
     ctx.beginPath(); ctx.arc(first.x, first.y, 22, 0, TAU); ctx.stroke();
     ctx.restore();
   };
@@ -798,7 +850,7 @@
       const sinceError = n.errorAt ? (now - n.errorAt) / 1000 : Infinity;
       const haloRadius = isNext ? 30 + Math.sin(G.elapsed * 4) * 3 : 18;
       const haloColor = isCompleted ? 'rgba(255, 216, 154, 0.45)' :
-                        isNext ? 'rgba(90, 240, 255, 0.5)' :
+                        isNext ? accentRgba(0.5) :
                         sinceError < 0.6 ? `rgba(255, 90, 107, ${0.6 * (1 - sinceError / 0.6)})` :
                         'rgba(255, 245, 216, 0.18)';
       const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, haloRadius);
@@ -814,7 +866,7 @@
       ctx.beginPath(); ctx.arc(n.x, n.y, isNext ? 4.5 : 3.5, 0, TAU); ctx.fill();
 
       if (isNext) {
-        ctx.strokeStyle = 'rgba(90, 240, 255, 0.7)';
+        ctx.strokeStyle = accentRgba(0.7);
         ctx.lineWidth = 1.2;
         ctx.beginPath(); ctx.arc(n.x, n.y, 16 + Math.sin(G.elapsed * 4) * 1.5, 0, TAU);
         ctx.stroke();
@@ -1128,39 +1180,64 @@
   const GALAXY = {
     name: 'REMEMBERED',
     systems: [
+      // Top rim
+      { id: 'null',         name: 'NULL',         kicker: 'no carrier',
+        x: 0.50, y: 0.07, unlocked: false,
+        note: 'the silence between transmissions. last solar in the galaxy.', worlds: [] },
+      { id: 'deepcarrier',  name: 'DEEP CARRIER', kicker: 'below the band',
+        x: 0.22, y: 0.18, unlocked: false,
+        note: 'a sub-frequency. requires HOMEKEEPER · whole.', worlds: [] },
+      { id: 'nineteen',     name: '1981',         kicker: 'the year they left',
+        x: 0.78, y: 0.18, unlocked: false,
+        note: 'the operator who closed the room. requires MNEMOSYNE.', worlds: [] },
+
+      // Upper orbit
+      { id: 'farecho',      name: 'FAR ECHO',     kicker: 'past signal',
+        x: 0.12, y: 0.36, unlocked: false,
+        note: 'reachable when HOMEKEEPER · PRIME is complete.', worlds: [] },
+      { id: 'outer',        name: 'OUTER',        kicker: 'edge of carrier',
+        x: 0.88, y: 0.36, unlocked: false,
+        note: 'a faint signal. coming in a future update.', worlds: [] },
+
+      // Centre — the live solar
       {
-        id: 'homekeeper', name: 'HOMEKEEPER',
-        kicker: 'home system',
-        x: 0.50, y: 0.55, unlocked: true,
+        id: 'homekeeper', name: 'HOMEKEEPER', kicker: 'home system',
+        x: 0.50, y: 0.50, unlocked: true,
         worlds: [
-          {
-            id: 'prime', name: 'PRIME',
-            kicker: 'the message',
+          { id: 'prime', name: 'PRIME', kicker: 'the message',
             x: 0.50, y: 0.50, unlocked: true,
-            sigilCount: STORY_LEVELS.length,
-            mode: 'story',
-          },
-          {
-            id: 'drift', name: 'DRIFT',
-            kicker: 'moving stars',
-            x: 0.22, y: 0.74, unlocked: false,
-            sigilCount: 10, mode: 'drift',
-            note: 'unlocked once homekeeper · prime is complete (next update)',
-          },
-          {
-            id: 'cross', name: 'CROSS',
-            kicker: 'avoid the red',
-            x: 0.78, y: 0.74, unlocked: false,
-            sigilCount: 10, mode: 'cross',
-            note: 'requires drift · coming soon',
-          },
+            sigilCount: STORY_LEVELS.length, mode: 'story' },
+          { id: 'drift', name: 'DRIFT', kicker: 'moving stars',
+            x: 0.22, y: 0.74, unlocked: false, sigilCount: 24, mode: 'drift',
+            note: 'unlocked once homekeeper · prime is complete (next update)' },
+          { id: 'cross', name: 'CROSS', kicker: 'avoid the red',
+            x: 0.78, y: 0.74, unlocked: false, sigilCount: 24, mode: 'cross',
+            note: 'requires drift · coming soon' },
         ],
       },
-      { id: 'farecho', name: 'FAR ECHO', kicker: 'next solar', x: 0.18, y: 0.28, unlocked: false,
-        note: 'reachable when HOMEKEEPER is whole', worlds: [] },
-      { id: 'outer', name: 'OUTER', kicker: 'edge of carrier', x: 0.82, y: 0.30, unlocked: false,
-        note: 'a faint signal — coming in a future update', worlds: [] },
-      { id: 'origin', name: 'ORIGIN', kicker: 'unknown', x: 0.50, y: 0.86, unlocked: false,
+
+      // Lower orbit
+      { id: 'mnemosyne',    name: 'MNEMOSYNE',    kicker: 'memory orbit',
+        x: 0.12, y: 0.64, unlocked: false,
+        note: 'before the keys were ever pressed. requires FAR ECHO.', worlds: [] },
+      { id: 'lunaria',      name: 'LUNARIA',      kicker: 'a named moon',
+        x: 0.88, y: 0.64, unlocked: false,
+        note: 'the moon you orbit. requires OUTER.', worlds: [] },
+
+      // Lower rim
+      { id: 'thequiet',     name: 'THE QUIET',    kicker: 'between keys',
+        x: 0.22, y: 0.82, unlocked: false,
+        note: 'the long pause. requires 1981.', worlds: [] },
+      { id: 'coldroom',     name: 'COLD ROOM',    kicker: 'the waiting',
+        x: 0.78, y: 0.82, unlocked: false,
+        note: 'they left the radio on. requires DEEP CARRIER.', worlds: [] },
+
+      // Bottom
+      { id: 'hibernal',     name: 'HIBERNAL',     kicker: 'sleep cycle',
+        x: 0.38, y: 0.93, unlocked: false,
+        note: 'winters between transmissions. requires LUNARIA.', worlds: [] },
+      { id: 'origin',       name: 'ORIGIN',       kicker: 'unknown',
+        x: 0.62, y: 0.93, unlocked: false,
         note: 'silent. for now.', worlds: [] },
     ],
   };
@@ -1231,29 +1308,28 @@
       clearMap();
       setHeader('GALAXY', GALAXY.name);
 
-      // Decorative central singularity
-      circleSvg(500, 500, 14, { stroke: 'rgba(255, 245, 216, 0.45)', width: 1 });
-      circleSvg(500, 500, 60, { stroke: 'rgba(255, 245, 216, 0.06)', dash: '4 6' });
-
-      // Orbital paths from center to each system
-      GALAXY.systems.forEach(sys => {
-        const sx = sys.x * 1000, sy = sys.y * 1000;
-        const r = dist(500, 500, sx, sy);
+      // A few concentric reference rings — feels like a galactic chart
+      // without drawing twelve overlapping circles.
+      [180, 320, 460].forEach(r => {
         circleSvg(500, 500, r, {
-          stroke: sys.unlocked ? 'rgba(90, 240, 255, 0.18)' : 'rgba(241, 234, 216, 0.05)',
-          dash: '2 6',
+          stroke: 'rgba(241, 234, 216, 0.05)', dash: '2 8',
         });
       });
+      // Central singularity / unknown core
+      circleSvg(500, 500, 30, { stroke: 'rgba(255, 245, 216, 0.18)', dash: '3 5' });
+      circleSvg(500, 500, 6, { fill: 'rgba(255, 245, 216, 0.55)' });
 
       GALAXY.systems.forEach(sys => {
         const totalWorlds = sys.worlds.length;
         const unlockedWorlds = sys.worlds.filter(w => w.unlocked).length;
-        const meta = sys.unlocked ?
-          (totalWorlds > 0 ? `${unlockedWorlds} / ${totalWorlds} worlds` : 'empty') :
-          'locked';
+        const meta = sys.unlocked
+          ? (totalWorlds > 0 ? `${unlockedWorlds} / ${totalWorlds} worlds` : 'empty')
+          : 'locked';
         const cls = sys.unlocked ? 'current' : 'locked';
-        makeNode(sys.x, sys.y, sys.name, cls, meta,
-          sys.unlocked ? () => showSolar(sys.id) : null);
+        makeNode(sys.x, sys.y, sys.name, cls, meta, () => {
+          if (sys.unlocked) showSolar(sys.id);
+          else setStatus(sys.note || 'locked.');
+        });
       });
 
       setStatus('tap a solar system to descend');
@@ -1263,6 +1339,7 @@
       sysId = id;
       const sys = GALAXY.systems.find(s => s.id === id);
       if (!sys) return renderGalaxy();
+      applyPalette(paletteFor('REMEMBERED', id));
       clearMap();
       setHeader('SOLAR · ' + GALAXY.name, sys.name);
 
@@ -1275,7 +1352,7 @@
         const wx = w.x * 1000, wy = w.y * 1000;
         const r = dist(500, 500, wx, wy);
         circleSvg(500, 500, r, {
-          stroke: w.unlocked ? 'rgba(90, 240, 255, 0.18)' : 'rgba(241, 234, 216, 0.05)',
+          stroke: w.unlocked ? accentRgba(0.22) : 'rgba(241, 234, 216, 0.05)',
           dash: '2 6',
         });
       });
@@ -1318,6 +1395,7 @@
       const sys = GALAXY.systems.find(s => s.id === sId);
       const w = sys?.worlds.find(ww => ww.id === wId);
       if (!w) return renderGalaxy();
+      applyPalette(paletteFor('REMEMBERED', sId, wId));
       clearMap();
       setHeader('WORLD · ' + sys.name, w.name);
 
@@ -1383,18 +1461,27 @@
 
     const open = () => {
       view = 'galaxy';
+      applyPalette(paletteFor('REMEMBERED'));
       showScreens({ map: true });
       renderGalaxy();
     };
 
     const back = () => {
-      if (view === 'world') showSolar(sysId);
-      else if (view === 'solar') showGalaxy();
-      else closeMap();
+      if (view === 'world') {
+        // Going back from world to solar — restore solar palette
+        applyPalette(paletteFor('REMEMBERED', sysId));
+        showSolar(sysId);
+      } else if (view === 'solar') {
+        applyPalette(paletteFor('REMEMBERED'));
+        showGalaxy();
+      } else {
+        closeMap();
+      }
     };
 
     const closeMap = () => {
       view = 'galaxy';
+      applyPalette(paletteFor('REMEMBERED'));
       state = STATE.TITLE;
       refreshTitleStats();
       showScreens({ title: true });
@@ -1570,6 +1657,7 @@
 
   resize();
   buildStars();
+  applyPalette(paletteFor('REMEMBERED'));
   bootSequence();
   requestAnimationFrame((t) => { last = t; loop(t); });
 
