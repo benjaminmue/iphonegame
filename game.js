@@ -718,6 +718,11 @@
     // Tip strip
     G.tipText = buildTip(lvl.cfg);
     G.tipUntil = performance.now() + 3200;
+    // Reset per-sigil mechanic state
+    G.holdNodeIdx = null;
+    G.holdStartAt = 0;
+    G.peekUntil = lvl.cfg.whisper ? performance.now() + 700 : 0; // brief opening peek
+    G.peeksRemaining = lvl.cfg.whisper ? (lvl.cfg.peeks || 3) : 0;
     updateLevelLabel();
     // Force a paint on the next animation frame in case iOS Safari is
     // sitting on a stale canvas (we've occasionally seen the first
@@ -915,20 +920,63 @@
     startSigil('prime', 0, levelIdx);
   };
 
+  // First-time mechanic intros — collect every MECHANIC_INTROS entry whose
+  // .test() matches this config and the player hasn't seen.
+  const pendingIntros = (cfg) => {
+    if (!Array.isArray(store.introsSeen)) store.introsSeen = [];
+    const out = [];
+    for (const k of Object.keys(MECHANIC_INTROS)) {
+      const m = MECHANIC_INTROS[k];
+      if (m.test(cfg) && !store.introsSeen.includes(m.key)) out.push(m);
+    }
+    return out;
+  };
+  const showMechIntro = (intro, onContinue) => {
+    document.getElementById('mech-intro-title').textContent = intro.title;
+    document.getElementById('mech-intro-body').textContent = intro.body;
+    showScreens({ mech_intro: true });
+    if (!Array.isArray(store.introsSeen)) store.introsSeen = [];
+    if (!store.introsSeen.includes(intro.key)) {
+      store.introsSeen.push(intro.key);
+      saveStore();
+    }
+    const btn = document.getElementById('btn-mech-intro-continue');
+    btn.onclick = () => { Audio.tick(660); onContinue(); };
+  };
+  const runIntroQueue = (intros, onDone) => {
+    let i = 0;
+    const next = () => {
+      if (i >= intros.length) { onDone(); return; }
+      showMechIntro(intros[i++], next);
+    };
+    next();
+  };
+
   // Play any (world, level, sigil) coordinate. Configs come from getSigilCfg,
   // which returns the narrative STORY_LEVELS configs for PRIME · LEVEL 01 and
   // procedural rising-difficulty configs everywhere else.
   const startSigil = (worldId, lvlIdx, sigIdx) => {
+    const cfg = getSigilCfg(worldId, lvlIdx, sigIdx);
+    const intros = pendingIntros(cfg);
+    if (intros.length > 0) {
+      // Show each unseen mechanic intro in turn, then start the sigil
+      runIntroQueue(intros, () => beginSigilPlay(worldId, lvlIdx, sigIdx, cfg));
+      return;
+    }
+    beginSigilPlay(worldId, lvlIdx, sigIdx, cfg);
+  };
+  const beginSigilPlay = (worldId, lvlIdx, sigIdx, cfg) => {
+    clearPlayState();
     G.mode = 'sigil';
     G.playWorldId = worldId;
     G.playLevelIdx = lvlIdx;
     G.playSigilIdx = sigIdx;
-    G.levelIdx = sigIdx; // for narrative success screen back-compat
+    G.levelIdx = sigIdx;
     G.runMistakes = 0;
     G.seededRng = null;
     applyPalette(paletteFor('REMEMBERED', 'homekeeper', worldId, `${lvlIdx}:${sigIdx}`));
     state = STATE.PLAYING;
-    loadLevel(getSigilCfg(worldId, lvlIdx, sigIdx));
+    loadLevel(cfg);
     showScreens({ hud: true });
   };
 
@@ -941,6 +989,10 @@
     G.ghost = null;
     G.traceSamples = [];
     G.tipText = '';
+    G.holdNodeIdx = null;
+    G.holdStartAt = 0;
+    G.peekUntil = 0;
+    G.peeksRemaining = 0;
   };
 
   const startDaily = () => {
@@ -1109,6 +1161,26 @@
     if (G.config?.redDisconnects && G.progress >= 2 && G.successPhase === 0) {
       checkLineBreaks();
     }
+    // HOLD mechanic — advance when the player has held a star long enough,
+    // while also drag-tracking: if the finger leaves the held star's hit
+    // radius, the hold is cancelled (handled in handleHit).
+    if (G.holdNodeIdx !== null && G.holdNodeIdx !== undefined &&
+        G.config && G.config.hold > 0 && G.successPhase === 0) {
+      const n = G.nodes[G.holdNodeIdx];
+      // Verify the finger is still within the node's hit radius
+      if (n && dist(G.fingerX, G.fingerY, n.x, n.y) > NODE_HIT_RADIUS + 6) {
+        G.holdNodeIdx = null;
+      } else if (n) {
+        const elapsed = (performance.now() - G.holdStartAt) / 1000;
+        if (elapsed >= G.config.hold) {
+          const idx = G.holdNodeIdx;
+          G.holdNodeIdx = null;
+          onCorrectHit(idx);
+        }
+      }
+    }
+    // WHISPER mechanic — peek timer decays
+    if (G.peekUntil && performance.now() > G.peekUntil) G.peekUntil = 0;
     if (G.successPhase === 1) {
       G.successTimer += dt;
       const threshold = G.mode === 'endless' ? 1.0 : 1.6;
@@ -1147,6 +1219,12 @@
       alpha = f > 0 ? Math.min(1, f * 1.2) : 0;
     }
     if (alpha < 0.001) return;
+    const mirror = G.config && G.config.mirror;
+    const mapPt = (n) => {
+      if (mirror === 'h') return { x: W - n.x, y: n.y };
+      if (mirror === 'v') return { x: n.x, y: H - n.y };
+      return { x: n.x, y: n.y };
+    };
     ctx.save();
     ctx.strokeStyle = accentRgba(0.20 * alpha);
     ctx.lineWidth = 1.2;
@@ -1154,13 +1232,14 @@
     ctx.lineCap = 'round';
     ctx.beginPath();
     for (let i = 0; i < G.path.length; i++) {
-      const n = G.nodes[G.path[i]];
-      if (i === 0) ctx.moveTo(n.x, n.y); else ctx.lineTo(n.x, n.y);
+      const p = mapPt(G.nodes[G.path[i]]);
+      if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
     }
     ctx.stroke();
     ctx.setLineDash([]);
     // Start star ring — kept even in no-hint mode (start star is always cyan).
-    const first = G.nodes[G.path[0]];
+    // In mirror mode the start ring is also at the mirrored position.
+    const first = mapPt(G.nodes[G.path[0]]);
     ctx.strokeStyle = accentRgba(noHint ? 0.55 : 0.4 * alpha);
     ctx.beginPath(); ctx.arc(first.x, first.y, 22, 0, TAU); ctx.stroke();
     ctx.restore();
@@ -1247,6 +1326,13 @@
     const now = performance.now();
     const nextRequired = G.progress < G.path.length ? G.path[G.progress] : -1;
     const knotVis = (G.config && G.config.knotVisibility) || 'badge';
+    // WHISPER fade — when whisper is active and the player isn't peeking,
+    // stars render at very low alpha. Completed stars are spared (you've
+    // discovered them; they stay visible as a record).
+    const whisper = G.config && G.config.whisper;
+    const peeking = whisper && (G.peekUntil || 0) > now;
+    const peekRemain = peeking ? (G.peekUntil - now) / 1100 : 0;
+    const whisperAlpha = peeking ? Math.max(0.4, peekRemain) : 0.08;
     for (let i = 0; i < G.nodes.length; i++) {
       const n = G.nodes[i];
       const isNext = i === nextRequired;
@@ -1254,7 +1340,10 @@
       const isPartial = n.requiredUses > 0 && n.useCount > 0 && !isCompleted;
       const usesRemaining = Math.max(0, n.requiredUses - n.useCount);
       const sinceError = n.errorAt ? (now - n.errorAt) / 1000 : Infinity;
-      const haloRadius = isNext ? 30 + Math.sin(G.elapsed * 4) * 3 : 18;
+      // PULSE — size oscillation when the world has a pulse tempo
+      const pulseAmp = (G.config && G.config.pulse)
+        ? (Math.sin(G.elapsed * G.config.pulse + i * 0.6) * 4 + 4) : 0;
+      const haloRadius = (isNext ? 30 + Math.sin(G.elapsed * 4) * 3 : 18) + pulseAmp * 0.6;
       const haloColor = isCompleted ? 'rgba(255, 216, 154, 0.45)' :
                         isPartial ? 'rgba(255, 216, 154, 0.30)' :
                         isNext ? accentRgba(0.5) :
@@ -1309,7 +1398,28 @@
         ctx.arc(n.drift.cx, n.drift.cy, n.drift.radius, 0, TAU);
         ctx.stroke();
       }
+
+      // HOLD indicator — ring fills as you hold this star
+      if (G.holdNodeIdx === i && G.config && G.config.hold > 0) {
+        const elapsed = (performance.now() - G.holdStartAt) / 1000;
+        const frac = clamp(elapsed / G.config.hold, 0, 1);
+        ctx.strokeStyle = `rgba(${C.accentRgb}, 0.95)`;
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, 14, -Math.PI / 2, -Math.PI / 2 + TAU * frac);
+        ctx.stroke();
+      }
     }
+
+  };
+
+  const drawWhisperVeil = () => {
+    if (!G.config || !G.config.whisper) return;
+    const now = performance.now();
+    const peeking = (G.peekUntil || 0) > now;
+    if (peeking) return; // see clearly during the peek
+    ctx.fillStyle = 'rgba(6, 5, 13, 0.92)';
+    ctx.fillRect(0, 0, W, H);
   };
 
   const drawParticles = () => {
@@ -1346,6 +1456,7 @@
       drawCompletedPath();
       drawNodes();
       drawParticles();
+      drawWhisperVeil();
     }
     drawFlash();
     ctx.restore();
@@ -1376,16 +1487,27 @@
 
     if (isNext) {
       // Correct next star (works for first hit AND for revisits on ×2 knots).
-      // A fresh touchdown is allowed when:
-      //   - this is the very first node (progress === 0), OR
-      //   - the stroke was broken (G.touching === false) and the player
-      //     is now re-grabbing the trace at the right star.
+      // Fresh touchdown allowed at progress 0 OR after a broken stroke.
       if (isInitial) {
         if (G.progress > 0 && G.touching) return;
         G.touching = true;
       }
+      // HOLD mechanic: don't advance immediately. Start a hold timer; the
+      // main loop calls onCorrectHit() when the duration elapses.
+      const holdDur = (G.config && G.config.hold) || 0;
+      if (holdDur > 0) {
+        if (G.holdNodeIdx !== hit) {
+          G.holdNodeIdx = hit;
+          G.holdStartAt = performance.now();
+        }
+        return;
+      }
       onCorrectHit(hit);
       return;
+    }
+    // If we were holding a star and the finger has moved off, clear the hold
+    if (G.holdNodeIdx !== null && G.holdNodeIdx !== undefined && G.holdNodeIdx !== hit) {
+      G.holdNodeIdx = null;
     }
 
     // Not the next required:
@@ -1405,6 +1527,15 @@
     G.fingerX = e.clientX - rect.left;
     G.fingerY = e.clientY - rect.top;
     G.fingerActive = true;
+    // WHISPER — tap on empty space triggers a peek (limited count)
+    const hit = tryHitAt(G.fingerX, G.fingerY);
+    if (hit === -1 && G.config && G.config.whisper && (G.peeksRemaining || 0) > 0) {
+      G.peeksRemaining -= 1;
+      G.peekUntil = performance.now() + 1100;
+      Audio.tick(880, 0.05);
+      vibrate(4);
+      return;
+    }
     handleHit(G.fingerX, G.fingerY, true);
   };
 
@@ -1462,6 +1593,7 @@
     failed: document.getElementById('screen-failed'),
     endless_over: document.getElementById('screen-endless-over'),
     daily_result: document.getElementById('screen-daily-result'),
+    mech_intro: document.getElementById('screen-mech-intro'),
     map: document.getElementById('screen-map'),
     hud: document.getElementById('hud'),
   };
@@ -1782,10 +1914,60 @@
       },
 
       // ── mid ring (4 solars on diagonals — clear of HOMEKEEPER's vertical line)
+      // DEEP CARRIER is the second playable solar. Same shape as HOMEKEEPER
+      // (10 worlds, central Sun) but every world inherits a harder baseline.
       { id: 'deepcarrier', name: 'DEEP CARRIER', kicker: 'below the band',
         orbit: { r: TIERS.mid.r, baseAngle: Math.PI * 0.25, speed: TIERS.mid.speed },
-        requires: 'homekeeper', unlocked: false, worlds: [],
-        note: 'a sub-frequency. requires HOMEKEEPER · whole.' },
+        requires: 'homekeeper', unlocked: false,
+        note: 'a sub-frequency. unlocks when HOMEKEEPER is whole.',
+        sun: {
+          id: 'deepcarrier-sun', name: 'HEART OF DEEP CARRIER',
+          kicker: 'the sub-bass star',
+          locked_note: 'sealed · lights up when every DEEP CARRIER world is whole.',
+          ready_note: 'the carrier is open. (final challenge — next update)',
+        },
+        worlds: [
+          { id: 'subsonic',  name: 'SUBSONIC', kicker: 'low band',
+            mechanic: 'basic tracing — below the noise',
+            orbit: { r: 0.46, baseAngle: -Math.PI / 2, speed: 0.045 },
+            unlocked: true, sigils: [] },
+          { id: 'static',    name: 'STATIC',   kicker: 'drifting noise',
+            mechanic: 'stars drift on the carrier',
+            orbit: { r: 0.40, baseAngle: Math.PI * 0.85, speed: 0.062 },
+            requires: 'subsonic', unlocked: false, sigils: [] },
+          { id: 'hum',       name: 'HUM',      kicker: 'red interference',
+            mechanic: 'red bands — do not cross',
+            orbit: { r: 0.40, baseAngle: Math.PI * 0.15, speed: 0.060 },
+            requires: 'static', unlocked: false, sigils: [] },
+          { id: 'decay',     name: 'DECAY',    kicker: 'short half-life',
+            mechanic: 'hints decay almost instantly',
+            orbit: { r: 0.34, baseAngle: Math.PI * 1.10, speed: 0.082 },
+            requires: 'hum', unlocked: false, sigils: [] },
+          { id: 'reverb',    name: 'REVERB',   kicker: 'reflected',
+            mechanic: 'mirror — the hint is on the wrong side',
+            orbit: { r: 0.34, baseAngle: Math.PI * 1.90, speed: 0.078 },
+            requires: 'decay', unlocked: false, sigils: [] },
+          { id: 'sustain',   name: 'SUSTAIN',  kicker: 'long anchor',
+            mechanic: 'hold each star to lock',
+            orbit: { r: 0.28, baseAngle: Math.PI * 0.45, speed: 0.110 },
+            requires: 'reverb', unlocked: false, sigils: [] },
+          { id: 'beat',      name: 'BEAT',     kicker: 'on the kick',
+            mechanic: 'pulse — stars beat with the carrier',
+            orbit: { r: 0.28, baseAngle: Math.PI * 1.55, speed: 0.105 },
+            requires: 'sustain', unlocked: false, sigils: [] },
+          { id: 'hiss',      name: 'HISS',     kicker: 'just under threshold',
+            mechanic: 'whisper — stars hidden, tap to peek',
+            orbit: { r: 0.22, baseAngle: Math.PI * 0.20, speed: 0.150 },
+            requires: 'beat', unlocked: false, sigils: [] },
+          { id: 'dropout',   name: 'DROPOUT',  kicker: 'cutting in and out',
+            mechanic: 'segments randomly truncate · coming in a future update',
+            orbit: { r: 0.22, baseAngle: Math.PI * 1.80, speed: 0.140 },
+            requires: 'hiss', unlocked: false, sigils: [] },
+          { id: 'carrier',   name: 'CARRIER WAVE', kicker: 'all at once',
+            mechanic: 'every DEEP CARRIER mechanic combined',
+            orbit: { r: 0.15, baseAngle: Math.PI * 1.00, speed: 0.230 },
+            requires: 'dropout', unlocked: false, sigils: [] },
+        ] },
       { id: 'nineteen',    name: '1981',         kicker: 'the year they left',
         orbit: { r: TIERS.mid.r, baseAngle: Math.PI * 0.75, speed: TIERS.mid.speed * 1.05 },
         requires: 'deepcarrier', unlocked: false, worlds: [],
@@ -1852,16 +2034,28 @@
 
   // World-specific mechanic flags applied to procedural sigil configs.
   const WORLD_MECHANIC = {
-    prime:   {},
-    drift:   { drift: true },
-    cross:   { red: true },
-    echo:    { hintFadeMul: 0.4 },
-    mirror:  {},          // future mechanic
-    hold:    {},          // future mechanic
-    pulse:   {},          // future mechanic
-    whisper: {},          // future mechanic
-    fork:    {},          // future mechanic
-    entropy: { drift: true, red: true, hintFadeMul: 0.4 },
+    // HOMEKEEPER
+    prime:    {},
+    drift:    { drift: true },
+    cross:    { red: true },
+    echo:     { hintFadeMul: 0.3 },
+    mirror:   { mirror: 'h' },                    // hint reflected horizontally
+    hold:     { hold: 0.5 },                      // 0.5s anchor per star
+    pulse:    { pulse: 1.4 },                     // 1.4 rad/s beat
+    whisper:  { whisper: true, peeks: 3 },        // stars hidden; 3 peeks
+    fork:     {},                                  // engine TBD
+    entropy:  { drift: true, red: true, mirror: 'h', hold: 0.35, hintFadeMul: 0.5 },
+    // DEEP CARRIER (next solar) — same mechanics, harder baseline
+    subsonic: {},
+    static:   { drift: true },
+    hum:      { red: true },
+    decay:    { hintFadeMul: 0.25 },
+    reverb:   { mirror: 'h' },
+    sustain:  { hold: 0.6 },
+    beat:     { pulse: 1.7 },
+    hiss:     { whisper: true, peeks: 2 },
+    dropout:  {},
+    carrier:  { drift: true, red: true, mirror: 'h', hold: 0.4, hintFadeMul: 0.4 },
   };
 
   // Procedural sigil config for a (world, level, sigil) coordinate.
@@ -1913,6 +2107,14 @@
     // less predictable.
     if (m.red && diff >= 180) cfg.redLinearChance = 0.5;
     if (m.hintFadeMul && cfg.hintFade > 0) cfg.hintFade *= m.hintFadeMul;
+    // World-signature mechanics — inherited from WORLD_MECHANIC
+    if (m.mirror) cfg.mirror = m.mirror;
+    if (m.hold) cfg.hold = m.hold;
+    if (m.pulse) cfg.pulse = m.pulse;
+    if (m.whisper) {
+      cfg.whisper = true;
+      cfg.peeks = m.peeks || 3;
+    }
     return cfg;
   };
 
@@ -1985,6 +2187,30 @@
       body: 'no path is shown. you must deduce the order from the stars themselves. trust the shape.',
       test: (cfg) => !!cfg.noHint,
     },
+    mirror: {
+      key: 'mirror',
+      title: 'MIRROR',
+      body: 'the hint is reflected. the visible path is on the wrong side — the real stars wait opposite. flip the shape in your head.',
+      test: (cfg) => !!cfg.mirror,
+    },
+    hold: {
+      key: 'hold',
+      title: 'HOLD',
+      body: 'press and hold each star to lock it. a ring fills as you wait; release too soon and the star releases too.',
+      test: (cfg) => (cfg.hold || 0) > 0,
+    },
+    pulse: {
+      key: 'pulse',
+      title: 'PULSE',
+      body: 'stars beat on a steady tempo. touch only when a star is at its brightest. off-beat hits are rejected.',
+      test: (cfg) => (cfg.pulse || 0) > 0,
+    },
+    whisper: {
+      key: 'whisper',
+      title: 'WHISPER',
+      body: 'the stars are hidden. tap empty space to peek — they appear for a moment. you have a limited number of peeks.',
+      test: (cfg) => !!cfg.whisper,
+    },
   };
 
   // Build the per-sigil tip strip text from the config
@@ -1994,12 +2220,16 @@
     if (cfg.decoys > 0) parts.push(`${cfg.decoys} decoy${cfg.decoys === 1 ? '' : 's'}`);
     if (cfg.duplicates > 0) parts.push(`${cfg.duplicates === 1 ? '×2 knot' : `${cfg.duplicates} ×2 knots`}`);
     if (cfg.drift) parts.push('drift');
+    if (cfg.mirror) parts.push('mirror');
+    if (cfg.hold) parts.push(`hold ${cfg.hold.toFixed(1)}s`);
+    if (cfg.pulse) parts.push('pulse');
+    if (cfg.whisper) parts.push(`whisper · ${cfg.peeks || 3} peeks`);
     if (cfg.redCount > 0) {
       parts.push(cfg.redDisconnects
         ? `${cfg.redCount} red · breaks lines`
         : `${cfg.redCount} red`);
     }
-    if (cfg.noHint) parts.push('no hint');
+    if (cfg.noHint) parts.push('no hint · 1s flash');
     else if (cfg.hintFade > 0) parts.push('hint fades');
     if (cfg.time > 0) parts.push(`${Math.round(cfg.time)}s`);
     return parts.join(' · ');
