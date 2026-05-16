@@ -120,10 +120,10 @@
 
   // Daily uses date as seed; config is fixed but feels different daily
   // because positions, decoys, and red star locations vary deterministically.
-  // The daily red star drifts — it's part of "today's challenge".
+  // The daily red star drifts AND can sever lines — it's the challenge.
   const DAILY_CONFIG = {
     count: 6, decoys: 2, hintFade: 3.5, time: 40,
-    drift: true, redCount: 1, redDrift: true,
+    drift: true, redCount: 1, redDrift: true, redDisconnects: true,
   };
 
   // -------------------------------------------------------------------------
@@ -756,6 +756,50 @@
     return null;
   };
 
+  // Drifting red stars can sever a completed segment if they orbit
+  // through it — gated by cfg.redDisconnects. Cooldown prevents rapid
+  // multi-breaks if the red star is camped on the line.
+  const checkLineBreaks = () => {
+    if ((G.lineBreakCooldown || 0) > 0) {
+      G.lineBreakCooldown = Math.max(0, G.lineBreakCooldown - 1 / 60);
+      return;
+    }
+    for (let i = 0; i < G.progress - 1; i++) {
+      const a = G.nodes[G.path[i]];
+      const b = G.nodes[G.path[i + 1]];
+      for (const r of G.redStars) {
+        if (!r.drift) continue; // only drifting reds disconnect
+        if (distPointToSeg(r.x, r.y, a.x, a.y, b.x, b.y) < RED_THRESHOLD) {
+          breakLineAt(i, r);
+          return;
+        }
+      }
+    }
+  };
+
+  const breakLineAt = (segIdx, redStar) => {
+    // Walk back: every node visited at path positions > segIdx loses one use
+    for (let i = segIdx + 1; i < G.progress; i++) {
+      const n = G.nodes[G.path[i]];
+      n.useCount = Math.max(0, (n.useCount || 0) - 1);
+      n.hit = n.requiredUses > 0 && n.useCount >= n.requiredUses;
+    }
+    G.progress = segIdx + 1;
+    G.lineBreakCooldown = 1.2;
+    // Feedback
+    G.flashAlpha = Math.max(G.flashAlpha, 0.55);
+    G.nudge = Math.max(G.nudge, 14);
+    G.mistakes += 1;
+    G.runMistakes += 1;
+    Audio.error();
+    Audio.tone(120, 0.3, 'sawtooth', 0.18, 0.001);
+    vibrate([20, 60, 20, 40, 20]);
+    if (redStar) spawnParticles(redStar.x, redStar.y, '#ff5a6b', 12, 130, 0.5, 2);
+    // The active stroke is broken — release the finger requirement so
+    // the player must re-touch the last good node before continuing.
+    G.touching = false;
+  };
+
   const onSigilComplete = () => {
     G.successPhase = 1;
     G.successTimer = 0;
@@ -976,6 +1020,10 @@
     if (G.touching && G.config) {
       G.traceSamples.push({ x: G.fingerX, y: G.fingerY });
       if (G.traceSamples.length > 240) G.traceSamples.shift();
+    }
+    // Line-break check: drifting reds can sever already-completed segments
+    if (G.config?.redDisconnects && G.progress >= 2 && G.successPhase === 0) {
+      checkLineBreaks();
     }
     if (G.successPhase === 1) {
       G.successTimer += dt;
@@ -1243,9 +1291,13 @@
     const isNext = G.progress < G.path.length && hit === G.path[G.progress];
 
     if (isNext) {
-      // Correct next star (works for first hit AND for revisits on ×2 knots)
+      // Correct next star (works for first hit AND for revisits on ×2 knots).
+      // A fresh touchdown is allowed when:
+      //   - this is the very first node (progress === 0), OR
+      //   - the stroke was broken (G.touching === false) and the player
+      //     is now re-grabbing the trace at the right star.
       if (isInitial) {
-        if (G.progress > 0) return; // can't re-start mid-path from a new touchdown
+        if (G.progress > 0 && G.touching) return;
         G.touching = true;
       }
       onCorrectHit(hit);
@@ -1751,6 +1803,10 @@
     if (diff >= 170) cfg.noHint = true;
     if (m.red) cfg.redCount = Math.min(3, 1 + Math.floor(diff / 40));
     if (m.redDrift) cfg.redDrift = true;
+    // High-difficulty escalation: drifting reds can sever a completed
+    // segment if they orbit through it. Only kicks in once the player
+    // has been through a meaningful difficulty curve.
+    if (m.red && diff >= 150) cfg.redDisconnects = true;
     if (m.hintFadeMul && cfg.hintFade > 0) cfg.hintFade *= m.hintFadeMul;
     return cfg;
   };
@@ -1833,7 +1889,11 @@
     if (cfg.decoys > 0) parts.push(`${cfg.decoys} decoy${cfg.decoys === 1 ? '' : 's'}`);
     if (cfg.duplicates > 0) parts.push(`${cfg.duplicates === 1 ? '×2 knot' : `${cfg.duplicates} ×2 knots`}`);
     if (cfg.drift) parts.push('drift');
-    if (cfg.redCount > 0) parts.push(`${cfg.redCount} red`);
+    if (cfg.redCount > 0) {
+      parts.push(cfg.redDisconnects
+        ? `${cfg.redCount} red · breaks lines`
+        : `${cfg.redCount} red`);
+    }
     if (cfg.noHint) parts.push('no hint');
     else if (cfg.hintFade > 0) parts.push('hint fades');
     if (cfg.time > 0) parts.push(`${Math.round(cfg.time)}s`);
