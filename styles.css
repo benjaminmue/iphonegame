@@ -106,7 +106,8 @@ body { position: fixed; inset: 0; }
 .hud-cluster { display: flex; flex-direction: column; gap: 4px; pointer-events: auto; }
 .hud-cluster.left { align-items: flex-start; }
 .hud-cluster.center { align-items: center; }
-.hud-cluster.right { align-items: flex-end; }
+.hud-cluster.right { align-items: flex-end; flex-direction: row; gap: 10px; }
+.hud-cluster.right .hud-timer-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .hud-label { color: var(--ink-faint); text-transform: uppercase; }
 .hud-value {
   color: var(--ink);
@@ -115,6 +116,9 @@ body { position: fixed; inset: 0; }
   font-variant-numeric: tabular-nums;
   text-shadow: 0 0 12px rgba(255, 245, 216, 0.35);
 }
+.hud-value.small { font-size: 14px; letter-spacing: 0.22em; }
+.hud-value.warn { color: var(--warn); text-shadow: 0 0 12px rgba(255, 90, 107, 0.5); }
+#hud-timer.warn { color: var(--warn); }
 .hud-combo {
   min-height: 26px;
   color: var(--warm);
@@ -540,6 +544,33 @@ body { position: fixed; inset: 0; }
 }
 
 /* Floating fragments */
+.success-line {
+  font-size: 17px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  font-style: italic;
+  text-align: center;
+  max-width: 24ch;
+  margin: 8px 0 4px;
+  text-shadow: 0 0 14px rgba(255, 245, 216, 0.35);
+}
+.success-stats {
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  color: var(--warm);
+  text-shadow: 0 0 10px rgba(255, 184, 107, 0.4);
+  margin-bottom: 8px;
+}
+.fail-msg {
+  font-size: 13px;
+  color: var(--ink-dim);
+  font-style: italic;
+  max-width: 24ch;
+  text-align: center;
+  margin: 0 0 6px;
+}
+
 .fragments {
   position: absolute;
   inset: 0;
