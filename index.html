@@ -13,7 +13,7 @@
   <meta name="description" content="SIGIL — a strange artefact found inside the phone." />
   <link rel="icon" href="data:image/svg+xml;utf8,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'&gt;&lt;circle cx='8' cy='10' r='2.5' fill='%23fff5d8'/&gt;&lt;circle cx='24' cy='10' r='2.5' fill='%235af0ff'/&gt;&lt;circle cx='16' cy='24' r='2.5' fill='%23fff5d8'/&gt;&lt;path d='M8 10 L24 10 L16 24 Z' stroke='%23fff5d8' stroke-width='1' fill='none' opacity='.6'/&gt;&lt;/svg&gt;" />
   <title>SIGIL</title>
-  <link rel="stylesheet" href="styles.css?v=6" />
+  <link rel="stylesheet" href="styles.css?v=7" />
 </head>
 <body>
   <main id="stage" aria-label="SIGIL game stage">
@@ -39,6 +39,7 @@
       </div>
     </header>
 
+    <!-- ──────────────────────── TITLE ──────────────────────── -->
     <section class="screen" id="screen-title">
       <div class="boot-frame">
         <div class="boot-stamp">
@@ -56,23 +57,62 @@
           <div class="recovery-bar" aria-hidden="true"><div class="recovery-bar-fill" id="recovery-bar-fill"></div></div>
         </div>
 
+        <button class="primary" id="btn-begin">BEGIN</button>
+
+        <!-- Mode tiles appear after the story is complete -->
+        <div class="modes" id="modes" hidden>
+          <button class="mode-tile" id="mode-daily">
+            <div class="mode-tile-name">DAILY</div>
+            <div class="mode-tile-meta">today: <span id="daily-today">untraced</span></div>
+            <div class="mode-tile-stat">streak <span id="daily-streak">0</span> · best <span id="daily-best-streak">0</span></div>
+          </button>
+          <button class="mode-tile" id="mode-endless">
+            <div class="mode-tile-name">ENDLESS</div>
+            <div class="mode-tile-meta">infinite sigils</div>
+            <div class="mode-tile-stat">best <span id="endless-best">0</span></div>
+          </button>
+          <button class="mode-tile" id="mode-replay">
+            <div class="mode-tile-name">RETRACE</div>
+            <div class="mode-tile-meta">redraw the artefact</div>
+            <div class="mode-tile-stat">from sigil 01</div>
+          </button>
+        </div>
+
         <div class="stats">
           <div><span class="k">SIGILS</span><span class="v" id="stat-sigils">0</span></div>
           <div><span class="k">BEST CLEAN</span><span class="v" id="stat-perfect">0</span></div>
         </div>
 
-        <button class="primary" id="btn-begin">BEGIN</button>
-
         <div class="title-meta">
-          <button class="link" id="btn-how">how to play</button>
+          <button class="link" id="btn-map">galaxy map</button>
           <span class="dot">·</span>
           <button class="link" id="btn-archive">archive</button>
+          <span class="dot">·</span>
+          <button class="link" id="btn-how">how to play</button>
           <span class="dot">·</span>
           <button class="link" id="btn-sound" aria-pressed="true">sound: on</button>
         </div>
       </div>
     </section>
 
+    <!-- ──────────────────────── GALAXY / SOLAR / WORLD MAP ──────────────────────── -->
+    <section class="screen" id="screen-map" hidden>
+      <header class="map-header">
+        <button class="map-nav" id="btn-map-back" aria-label="Back">‹</button>
+        <div class="map-titlebar">
+          <div class="map-kicker" id="map-kicker">GALAXY</div>
+          <div class="map-title" id="map-title">REMEMBERED</div>
+        </div>
+        <button class="map-nav" id="btn-map-close" aria-label="Close">✕</button>
+      </header>
+      <div class="map-canvas">
+        <svg class="map-svg" id="map-svg" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+        <div class="map-nodes" id="map-nodes"></div>
+      </div>
+      <div class="map-status" id="map-status"></div>
+    </section>
+
+    <!-- ──────────────────────── TUTORIAL ──────────────────────── -->
     <section class="screen subtle" id="screen-tutorial" hidden>
       <div class="tut-card">
         <div class="tut-step" id="tut-step">trace the sigil</div>
@@ -81,22 +121,25 @@
       <button class="link tut-skip" id="btn-tut-skip">skip onboarding</button>
     </section>
 
+    <!-- ──────────────────────── HOW TO PLAY ──────────────────────── -->
     <section class="screen" id="screen-how" hidden>
       <div class="boot-frame">
         <h2 class="title small">HOW TO PLAY</h2>
         <ul class="howto">
           <li><b>Start</b> on the cyan star — it's always the first one.</li>
-          <li><b>Drag</b> your finger through every white star in order.</li>
-          <li><b>Decoys</b> appear from sigil three. Touching a decoy resets the stroke.</li>
-          <li><b>Hints</b> show the path early — they fade at sigil four and beyond.</li>
-          <li><b>Time</b> matters from sigil six. Lift your finger to start the stroke over.</li>
-          <li><b>Ten sigils</b> recover ten lines of the artefact's message.</li>
+          <li><b>Drag</b> through every white star in order.</li>
+          <li><b>Decoys</b> from sigil three. Touching one resets the stroke.</li>
+          <li><b>Hints</b> fade from sigil four — remember the shape.</li>
+          <li><b>Drifting stars</b> appear in daily and deeper endless — they orbit; aim where they'll be.</li>
+          <li><b>Red stars</b> are hostile. Your trace line must not pass within their range.</li>
+          <li><b>Modes</b> — STORY decodes the message; DAILY is a fresh sigil each day; ENDLESS is infinite.</li>
         </ul>
         <p class="quiet">Each star you hit plays a note. A clean sigil plays a song.</p>
         <button class="primary" id="btn-how-back">BACK</button>
       </div>
     </section>
 
+    <!-- ──────────────────────── ARCHIVE ──────────────────────── -->
     <section class="screen" id="screen-archive" hidden>
       <div class="boot-frame archive-frame">
         <h2 class="title small">ARCHIVE</h2>
@@ -106,6 +149,7 @@
       </div>
     </section>
 
+    <!-- ──────────────────────── PAUSE ──────────────────────── -->
     <section class="screen" id="screen-pause" hidden>
       <div class="boot-frame">
         <div class="boot-stamp"><span class="boot-dot pulse"></span><span class="boot-tag">PAUSED</span></div>
@@ -116,6 +160,7 @@
       </div>
     </section>
 
+    <!-- ──────────────────────── SUCCESS (STORY) ──────────────────────── -->
     <section class="screen" id="screen-success" hidden>
       <div class="boot-frame">
         <div class="boot-stamp"><span class="boot-dot"></span><span class="boot-tag" id="success-num">FRAGMENT 01 / 10</span></div>
@@ -126,17 +171,45 @@
       </div>
     </section>
 
+    <!-- ──────────────────────── FAILED ──────────────────────── -->
     <section class="screen" id="screen-failed" hidden>
       <div class="boot-frame">
-        <div class="boot-stamp"><span class="boot-dot warn"></span><span class="boot-tag" id="fail-level">LEVEL 01</span></div>
+        <div class="boot-stamp"><span class="boot-dot warn"></span><span class="boot-tag" id="fail-level">SIGIL 01</span></div>
         <h2 class="title small">signal slipped</h2>
         <p class="fail-msg" id="fail-msg">the signal slipped. trace it again.</p>
         <button class="primary" id="btn-fail-retry">RETRY</button>
         <button class="link" id="btn-fail-menu">return to artefact</button>
       </div>
     </section>
+
+    <!-- ──────────────────────── ENDLESS OVER ──────────────────────── -->
+    <section class="screen" id="screen-endless-over" hidden>
+      <div class="boot-frame">
+        <div class="boot-stamp"><span class="boot-dot warn"></span><span class="boot-tag">ENDLESS</span></div>
+        <h2 class="title small">drifted</h2>
+        <div class="over-score">
+          <div class="over-row"><span class="k">SIGILS</span><span class="v" id="endless-score">00</span></div>
+          <div class="over-row"><span class="k">BEST</span><span class="v" id="endless-best-display">00</span></div>
+          <div class="over-row" id="endless-new" hidden><span class="badge">NEW BEST</span></div>
+        </div>
+        <button class="primary" id="btn-endless-again">AGAIN</button>
+        <button class="link" id="btn-endless-menu">return to artefact</button>
+      </div>
+    </section>
+
+    <!-- ──────────────────────── DAILY RESULT ──────────────────────── -->
+    <section class="screen" id="screen-daily-result" hidden>
+      <div class="boot-frame">
+        <div class="boot-stamp"><span class="boot-dot"></span><span class="boot-tag" id="daily-result-tag">DAILY</span></div>
+        <h2 class="title small" id="daily-result-title">traced</h2>
+        <p class="success-line" id="daily-result-msg">come back tomorrow.</p>
+        <div class="success-stats" id="daily-result-stats">streak: 1</div>
+        <button class="primary" id="btn-daily-back">RETURN TO ARTEFACT</button>
+        <button class="link" id="btn-daily-retry" hidden>retrace today's sigil</button>
+      </div>
+    </section>
   </main>
 
-  <script src="game.js?v=6" defer></script>
+  <script src="game.js?v=7" defer></script>
 </body>
 </html>

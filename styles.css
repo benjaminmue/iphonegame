@@ -571,6 +571,237 @@ body { position: fixed; inset: 0; }
   margin: 0 0 6px;
 }
 
+/* ────── Mode tiles (post-completion title) ────── */
+.modes {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mode-tile {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  padding: 14px 18px;
+  text-align: left;
+  color: var(--ink);
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 120ms ease, background 200ms ease, border-color 200ms ease;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+  overflow: hidden;
+}
+.mode-tile::before {
+  content: "";
+  position: absolute; right: -40%; top: -40%;
+  width: 160px; height: 160px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(var(--depth-accent, 90, 240, 255), 0.18), transparent 70%);
+  pointer-events: none;
+}
+.mode-tile:active { transform: scale(0.98); background: rgba(255,255,255,0.05); border-color: var(--ink-dim); }
+.mode-tile-name {
+  font-size: 16px;
+  letter-spacing: 0.34em;
+  font-weight: 500;
+  color: var(--ink);
+}
+.mode-tile-meta {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+.mode-tile-stat {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+#daily-today.done { color: var(--warm); }
+
+/* ────── Galaxy / Solar / World map ────── */
+#screen-map {
+  padding:
+    calc(var(--safe-t) + 12px)
+    calc(var(--safe-r) + 12px)
+    calc(var(--safe-b) + 12px)
+    calc(var(--safe-l) + 12px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+}
+.map-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 4px 4px;
+}
+.map-nav {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--line-strong);
+  color: var(--ink);
+  font-size: 18px;
+  display: grid; place-items: center;
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+.map-nav:active { transform: scale(0.92); }
+.map-titlebar {
+  flex: 1;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.map-kicker {
+  font-size: 10px;
+  letter-spacing: 0.36em;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+}
+.map-title {
+  font-size: 16px;
+  letter-spacing: 0.28em;
+  color: var(--ink);
+}
+.map-canvas {
+  flex: 1;
+  position: relative;
+  margin: 8px 0;
+  min-height: 0;
+}
+.map-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.map-nodes {
+  position: absolute;
+  inset: 0;
+}
+.map-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  font-family: inherit;
+  padding: 0;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.map-node-dot {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 245, 216, 0.9);
+  box-shadow: 0 0 14px rgba(255, 245, 216, 0.6);
+  border: 1px solid rgba(255, 245, 216, 0.4);
+  position: relative;
+}
+.map-node-dot::after {
+  content: "";
+  position: absolute; inset: -10px;
+  border-radius: 50%;
+  border: 1px dashed rgba(255, 245, 216, 0.2);
+  pointer-events: none;
+}
+.map-node-label {
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  color: var(--ink);
+  text-align: center;
+  text-shadow: 0 0 8px rgba(0,0,0,0.7);
+}
+.map-node-meta {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--ink-faint);
+}
+
+/* Locked nodes */
+.map-node.locked .map-node-dot {
+  background: rgba(90, 80, 110, 0.5);
+  box-shadow: none;
+  border-color: rgba(165, 157, 186, 0.25);
+}
+.map-node.locked .map-node-dot::after { display: none; }
+.map-node.locked .map-node-label { color: var(--ink-faint); }
+
+/* Current / featured node */
+.map-node.current .map-node-dot {
+  background: var(--accent, #5af0ff);
+  box-shadow: 0 0 18px rgba(90, 240, 255, 0.7);
+  animation: pulse-current 1.6s ease-in-out infinite;
+}
+.map-node.complete .map-node-dot {
+  background: var(--warm);
+  box-shadow: 0 0 14px rgba(255, 184, 107, 0.55);
+}
+.map-node.tiny .map-node-dot { width: 14px; height: 14px; }
+.map-node.tiny .map-node-label { font-size: 10px; letter-spacing: 0.18em; }
+@keyframes pulse-current {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.15); }
+}
+
+/* Sigil node (world view) — smaller, numbered */
+.sigil-node {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 36px; height: 36px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  font-family: inherit;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line-strong);
+  cursor: pointer;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 120ms ease;
+}
+.sigil-node:active { transform: translate(-50%, -50%) scale(0.92); }
+.sigil-node.locked {
+  color: rgba(90, 80, 110, 0.6);
+  border-color: rgba(165, 157, 186, 0.18);
+  cursor: not-allowed;
+}
+.sigil-node.next {
+  color: var(--ink);
+  background: rgba(90, 240, 255, 0.12);
+  border-color: var(--accent);
+  box-shadow: 0 0 12px rgba(90, 240, 255, 0.4);
+  animation: pulse-current 1.6s ease-in-out infinite;
+}
+.sigil-node.done {
+  color: var(--warm);
+  background: rgba(255, 184, 107, 0.08);
+  border-color: rgba(255, 184, 107, 0.5);
+}
+
+.map-status {
+  text-align: center;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--ink-faint);
+  padding: 6px 0;
+  min-height: 16px;
+}
+
 .fragments {
   position: absolute;
   inset: 0;
