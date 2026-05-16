@@ -887,6 +887,18 @@ body { position: fixed; inset: 0; }
   text-shadow: 0 0 12px rgba(255, 184, 107, 0.5);
 }
 
+/* Pulsing light streak on the "next-up" segment of world/level views */
+.streak-pulse {
+  fill: none;
+  stroke-dasharray: 22 170;
+  animation: streak-flow 1.8s linear infinite;
+  pointer-events: none;
+}
+@keyframes streak-flow {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -192; }
+}
+
 /* Sigil tip strip — appears just below the HUD when a sigil starts */
 .sigil-tip {
   position: absolute;

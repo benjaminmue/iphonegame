@@ -120,10 +120,11 @@
 
   // Daily uses date as seed; config is fixed but feels different daily
   // because positions, decoys, and red star locations vary deterministically.
-  // The daily red star drifts AND can sever lines — it's the challenge.
+  // The daily red drifts fast, can sever lines, and is the day's challenge.
   const DAILY_CONFIG = {
     count: 6, decoys: 2, hintFade: 3.5, time: 40,
     drift: true, redCount: 1, redDrift: true, redDisconnects: true,
+    redIntensity: 0.85,
   };
 
   // -------------------------------------------------------------------------
@@ -614,12 +615,27 @@
       }
       const red = { x, y, baseX: x, baseY: y, pulse: rng() * TAU };
       if (cfg.redDrift) {
-        red.drift = {
-          cx: x, cy: y,
-          radius: 24 + rng() * 30,
-          speed: 0.10 + rng() * 0.18, // slower than nodes so the player can plan
-          phase: rng() * TAU,
-        };
+        const intensity = cfg.redIntensity ?? 0.2;
+        const linearChance = cfg.redLinearChance || 0;
+        if (linearChance > 0 && rng() < linearChance) {
+          // Linear sweep — crosses the field; wraps via advanceNodes
+          const ang = rng() * TAU;
+          const sp = 90 + 110 * intensity; // pixels/sec
+          red.linear = {
+            vx: Math.cos(ang) * sp,
+            vy: Math.sin(ang) * sp,
+          };
+        } else {
+          red.drift = {
+            cx: x, cy: y,
+            // Sweep wider (covers more of the field) and orbit faster as
+            // intensity rises. At intensity 1 a full orbit completes in
+            // ~7s; at 0 it's ~50s.
+            radius: 30 + 30 * intensity + rng() * (28 + 60 * intensity),
+            speed: 0.16 + 0.50 * intensity + rng() * (0.16 + 0.40 * intensity),
+            phase: rng() * TAU,
+          };
+        }
       }
       redStars.push(red);
     }
@@ -704,6 +720,15 @@
         d.phase += d.speed * dt;
         r.x = d.cx + Math.cos(d.phase) * d.radius;
         r.y = d.cy + Math.sin(d.phase) * d.radius;
+      } else if (r.linear) {
+        r.x += r.linear.vx * dt;
+        r.y += r.linear.vy * dt;
+        // Wrap to opposite edge so the sweep is continuous
+        const pad = 30;
+        if (r.x < -pad) r.x = W + pad;
+        else if (r.x > W + pad) r.x = -pad;
+        if (r.y < PLAY_TOP - pad) r.y = H - PLAY_BOTTOM + pad;
+        else if (r.y > H - PLAY_BOTTOM + pad) r.y = PLAY_TOP - pad;
       }
     }
   };
@@ -1803,10 +1828,17 @@
     if (diff >= 170) cfg.noHint = true;
     if (m.red) cfg.redCount = Math.min(3, 1 + Math.floor(diff / 40));
     if (m.redDrift) cfg.redDrift = true;
+    // Red threat intensity rises smoothly with difficulty (0..1).
+    // Scales orbit speed and sweep radius so drifting reds feel
+    // progressively more dangerous instead of being a slow nuisance.
+    if (m.red) cfg.redIntensity = clamp((diff - 30) / 140, 0, 1);
     // High-difficulty escalation: drifting reds can sever a completed
-    // segment if they orbit through it. Only kicks in once the player
-    // has been through a meaningful difficulty curve.
+    // segment if they orbit through it.
     if (m.red && diff >= 150) cfg.redDisconnects = true;
+    // At the deepest difficulty, some reds switch to linear sweep —
+    // they cross the screen edge-to-edge instead of looping. Much
+    // less predictable.
+    if (m.red && diff >= 180) cfg.redLinearChance = 0.5;
     if (m.hintFadeMul && cfg.hintFade > 0) cfg.hintFade *= m.hintFadeMul;
     return cfg;
   };
@@ -2110,6 +2142,22 @@
       svg().appendChild(el);
     };
 
+    // A pulsing light streak that travels along a single segment —
+    // drawn over the regular connection so the player sees "this is
+    // where you go next".
+    const streakSvg = (x1, y1, x2, y2) => {
+      const ns = 'http://www.w3.org/2000/svg';
+      const el = document.createElementNS(ns, 'line');
+      el.setAttribute('x1', x1); el.setAttribute('y1', y1);
+      el.setAttribute('x2', x2); el.setAttribute('y2', y2);
+      el.setAttribute('stroke', `rgba(${C.accentRgb}, 0.95)`);
+      el.setAttribute('stroke-width', '3');
+      el.setAttribute('stroke-linecap', 'round');
+      el.setAttribute('vector-effect', 'non-scaling-stroke');
+      el.setAttribute('class', 'streak-pulse');
+      svg().appendChild(el);
+    };
+
     const circleSvg = (cx, cy, r, opts = {}) => {
       const ns = 'http://www.w3.org/2000/svg';
       const el = document.createElementNS(ns, 'circle');
@@ -2363,6 +2411,10 @@
       }
 
       // Connection spiral — bright between consecutive completed levels
+      let lastDoneLvl = -1;
+      for (let i = 0; i < N; i++) {
+        if (isLevelCompleted(w.id, i)) lastDoneLvl = i;
+      }
       for (let i = 0; i < N - 1; i++) {
         const a = positions[i], b = positions[i + 1];
         const bothDone = isLevelCompleted(w.id, i) && isLevelCompleted(w.id, i + 1);
@@ -2371,6 +2423,11 @@
           width: bothDone ? 1.4 : 0.6,
           dash: bothDone ? null : '5 8',
         });
+      }
+      // Light streak from last-done to next-up
+      if (lastDoneLvl >= 0 && lastDoneLvl + 1 < N) {
+        const a = positions[lastDoneLvl], b = positions[lastDoneLvl + 1];
+        streakSvg(a.x, a.y, b.x, b.y);
       }
 
       // Level nodes
@@ -2431,6 +2488,10 @@
       }
 
       // Connections
+      let lastDoneSig = -1;
+      for (let i = 0; i < N; i++) {
+        if (isSigilCompleted(w.id, lvlIdx, i)) lastDoneSig = i;
+      }
       for (let i = 0; i < N - 1; i++) {
         const a = positions[i], b = positions[i + 1];
         const bothDone = isSigilCompleted(w.id, lvlIdx, i) && isSigilCompleted(w.id, lvlIdx, i + 1);
@@ -2439,6 +2500,11 @@
           width: bothDone ? 1.6 : 0.7,
           dash: bothDone ? null : '5 8',
         });
+      }
+      // Light streak from last completed sigil to the next required
+      if (lastDoneSig >= 0 && lastDoneSig + 1 < N) {
+        const a = positions[lastDoneSig], b = positions[lastDoneSig + 1];
+        streakSvg(a.x, a.y, b.x, b.y);
       }
 
       // Sigil nodes
