@@ -2608,7 +2608,7 @@
         b.appendChild(m);
       }
       if (onClick) b.addEventListener('click', onClick);
-      else b.disabled = true;
+      else b.setAttribute('aria-disabled', 'true');
       nodes().appendChild(b);
       return b;
     };
@@ -2664,7 +2664,7 @@
             const cur = orbitalPos(sys.orbit, t);
             zoomInto(cur.x, cur.y, () => showSolar(sys.id));
           } else {
-            setStatus(lockMsg);
+            flashStatus(`${sys.name} — ${lockMsg}`);
           }
         });
         nodeRefs.set('sys:' + sys.id, el);
@@ -2695,7 +2695,7 @@
       meta.textContent = ready ? 'open' : 'sealed';
       el.appendChild(dot); el.appendChild(lbl); el.appendChild(meta);
       el.addEventListener('click', () => {
-        setStatus(ready ? GALAXY.core.ready_note : GALAXY.core.locked_note);
+        flashStatus(`${GALAXY.core.name} — ${ready ? GALAXY.core.ready_note : GALAXY.core.locked_note}`);
       });
       nodes().appendChild(el);
     };
@@ -2757,7 +2757,7 @@
               const cur = orbitalPos(w.orbit, t);
               zoomInto(cur.x, cur.y, () => showWorld(sys.id, w.id));
             } else {
-              setStatus(lockMsg);
+              flashStatus(`${w.name} — ${lockMsg}`);
             }
           });
           nodeRefs.set('w:' + w.id, el);
@@ -2790,7 +2790,7 @@
       meta.textContent = ready ? 'open' : 'sealed';
       el.appendChild(dot); el.appendChild(lbl); el.appendChild(meta);
       el.addEventListener('click', () => {
-        setStatus(ready ? sys.sun.ready_note : sys.sun.locked_note);
+        flashStatus(`${sys.sun.name} — ${ready ? sys.sun.ready_note : sys.sun.locked_note}`);
       });
       nodes().appendChild(el);
     };
@@ -2875,7 +2875,12 @@
           const nx = positions[i].x / 1000, ny = positions[i].y / 1000;
           b.addEventListener('click', () => zoomInto(nx, ny, () => showLevel(sId, wId, i)));
         } else {
-          b.disabled = true;
+          b.setAttribute('aria-disabled', 'true');
+          const num = String(i + 1).padStart(2, '0');
+          const prev = String(i).padStart(2, '0');
+          b.addEventListener('click', () => {
+            flashStatus(`LEVEL ${num} — sealed · complete LEVEL ${prev} to unlock`);
+          });
         }
         nodes().appendChild(b);
       }
@@ -2955,7 +2960,12 @@
             startSigil(w.id, lvlIdx, i);
           });
         } else {
-          b.disabled = true;
+          b.setAttribute('aria-disabled', 'true');
+          const num = String(i + 1).padStart(2, '0');
+          const prev = String(i).padStart(2, '0');
+          b.addEventListener('click', () => {
+            flashStatus(`SIGIL ${num} — sealed · complete SIGIL ${prev} to unlock`);
+          });
         }
         nodes().appendChild(b);
       }
@@ -3014,19 +3024,63 @@
       renderGalaxy();
     };
 
+    // Locked-node feedback — flash the status bar with the lock-message, plus
+    // a small audio + haptic cue. Replaces silent setStatus() for lock taps.
+    let statusFlashTimer = null;
+    const flashStatus = (text, ms = 2400) => {
+      const el = document.getElementById('map-status');
+      el.textContent = text;
+      // Restart the CSS animation by removing + forcing reflow + re-adding.
+      el.classList.remove('locked-flash');
+      void el.offsetWidth;
+      el.classList.add('locked-flash');
+      if (statusFlashTimer) clearTimeout(statusFlashTimer);
+      statusFlashTimer = setTimeout(() => {
+        el.classList.remove('locked-flash');
+        statusFlashTimer = null;
+      }, ms);
+      try { if (Audio && Audio.ready && Audio.ready()) Audio.tick(220, 0.06); } catch {}
+      try { vibrate && vibrate(8); } catch {}
+    };
+
+    // Zoom towards a screen point — keeps the world-point currently under that
+    // point fixed during the scale change. Without this, every zoom orbits
+    // the centre of the map regardless of where the user is pinching/scrolling.
+    const zoomTowards = (cursorX, cursorY, nextScale, tween = false) => {
+      const canv = document.getElementById('map-canvas');
+      const rect = canv.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const diffX = cursorX - cx;
+      const diffY = cursorY - cy;
+      const f = nextScale / scale;
+      // f = 1 → no-op; cursor-stable derivation:
+      //   tx_new = tx_old * f + diff * (1 - f)
+      tx = tx * f + diffX * (1 - f);
+      ty = ty * f + diffY * (1 - f);
+      scale = nextScale;
+      applyTransform(tween);
+    };
+
     // When a pinch or wheel-zoom releases beyond a tier-threshold, drill into
     // the element the gesture was centred on (drill-in) or step back a tier
-    // (drill-out). Returns true if a drill was triggered.
+    // (drill-out). Returns true if a real drill happened (caller should NOT
+    // snap-back). Returns false for "no node found" OR "node was locked" —
+    // caller should snap the scale back to the visible bounds.
     const tryDrillAtPoint = (clientX, clientY) => {
       const el = document.elementFromPoint(clientX, clientY);
-      const node = el && el.closest ? el.closest('.map-node') : null;
-      if (node && !node.disabled) {
-        suppressClick = true;
-        node.click();
-        setTimeout(() => { suppressClick = false; }, 120);
-        return true;
-      }
-      return false;
+      const node = el && el.closest
+        ? el.closest('.map-node, .sigil-node')
+        : null;
+      if (!node) return false;
+      const isLocked = node.classList.contains('locked')
+                    || node.classList.contains('sealed')
+                    || node.getAttribute('aria-disabled') === 'true';
+      // Always click — unlocked nodes drill, locked nodes flash a message.
+      suppressClick = true;
+      node.click();
+      setTimeout(() => { suppressClick = false; }, 120);
+      return !isLocked;
     };
 
     // Pinch + pan + tap-to-not-click suppression on the map canvas
@@ -3058,16 +3112,18 @@
         if (pointers.size === 2) {
           const ps = [...pointers.values()];
           const d = Math.hypot(ps[1].x - ps[0].x, ps[1].y - ps[0].y);
+          const newCx = (ps[0].x + ps[1].x) / 2;
+          const newCy = (ps[0].y + ps[1].y) / 2;
           if (pinchStartDist > 0) {
             // Allow overshoot up to PINCH_MAX / down to PINCH_MIN — release-
             // threshold decides if it's a tier-drill or just a snap-back.
-            scale = clamp(pinchStartScale * (d / pinchStartDist), PINCH_MIN, PINCH_MAX);
-            applyTransform(false);
+            const next = clamp(pinchStartScale * (d / pinchStartDist), PINCH_MIN, PINCH_MAX);
+            zoomTowards(newCx, newCy, next);
             movedSinceDown = true;
             suppressClick = true;
           }
-          pinchCenterX = (ps[0].x + ps[1].x) / 2;
-          pinchCenterY = (ps[0].y + ps[1].y) / 2;
+          pinchCenterX = newCx;
+          pinchCenterY = newCy;
         } else if (pointers.size === 1) {
           const dx = e.clientX - panStartX;
           const dy = e.clientY - panStartY;
@@ -3110,24 +3166,27 @@
               back();
             }
           } else if (scale > SCALE_MAX || scale < SCALE_MIN) {
-            // Overshot but didn't reach drill threshold — settle inside bounds.
-            scale = clamp(scale, SCALE_MIN, SCALE_MAX);
-            applyTransform(true);
+            // Overshot but didn't reach drill threshold — settle inside bounds
+            // while keeping the pinch-centre stable so the snap feels grounded.
+            zoomTowards(pinchCenterX, pinchCenterY, clamp(scale, SCALE_MIN, SCALE_MAX), true);
           }
         }
       };
       canv.addEventListener('pointerup', endPointer, { passive: true });
       canv.addEventListener('pointercancel', endPointer, { passive: true });
 
-      // Mouse-wheel + trackpad — same drill semantics as pinch. At the visible
-      // limit, an additional scroll-in/out crosses into a tier drill.
+      // Mouse-wheel + trackpad — same drill semantics as pinch. Zoom anchors
+      // on the cursor; at the visible limit, an additional scroll-in/out
+      // crosses into a tier drill.
       canv.addEventListener('wheel', (e) => {
         if (isZooming) { e.preventDefault(); return; }
         e.preventDefault();
         // Smooth exponential — same formula on mousewheel and trackpad
         const factor = Math.pow(1.0015, -e.deltaY);
         const next = scale * factor;
-        // Scroll-IN past the visible max → attempt drill into element under cursor
+        // Scroll-IN past the visible max → attempt drill into element under cursor.
+        // tryDrillAtPoint also fires for locked nodes (shows flash-message) but
+        // returns false in that case — we then snap back to MAX.
         if (e.deltaY < 0 && scale >= SCALE_MAX - 0.02) {
           if (tryDrillAtPoint(e.clientX, e.clientY)) return;
           scale = SCALE_MAX;
@@ -3139,8 +3198,7 @@
           back();
           return;
         }
-        scale = clamp(next, SCALE_MIN, SCALE_MAX);
-        applyTransform(false);
+        zoomTowards(e.clientX, e.clientY, clamp(next, SCALE_MIN, SCALE_MAX));
       }, { passive: false });
 
       // Capture-phase click filter — blocks clicks on map-nodes after a drag/pinch
