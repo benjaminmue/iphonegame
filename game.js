@@ -2407,9 +2407,17 @@
 
     // Zoom + pan
     let scale = 1, tx = 0, ty = 0;
+    // Visible at-rest bounds — what zoom-buttons clamp to
     const SCALE_MIN = 0.7, SCALE_MAX = 3.2;
+    // Extended bounds during an active pinch — overshoot is allowed because
+    // crossing a threshold on release triggers a tier-drill instead of clamping.
+    const PINCH_MIN = 0.4, PINCH_MAX = 4.5;
+    // Cross any of these on release of a pinch/wheel → drill into a tier
+    const DRILL_IN_THRESHOLD = 3.6;
+    const DRILL_OUT_THRESHOLD = 0.55;
     const pointers = new globalThis.Map();
     let pinchStartDist = 0, pinchStartScale = 1;
+    let pinchCenterX = 0, pinchCenterY = 0;
     let panStartX = 0, panStartY = 0, panOriginX = 0, panOriginY = 0;
     let suppressClick = false;
     let movedSinceDown = false;
@@ -2429,8 +2437,12 @@
       applyTransform(tween);
     };
 
-    // Drill-down zoom navigation. Camera dives into (cx, cy) (in normalised
-    // map coords 0..1), then swaps view content while invisible, then settles.
+    // Tier-drill animations. Both directions follow a single visual rule:
+    //   scale > 1 == closer, scale < 1 == farther.
+    // So drill-IN: old view zooms past, new view arrives from far (0.45 → 1).
+    //    drill-OUT: old view retreats (1 → 0.45), new view arrives close (1.8 → 1).
+    // This avoids the previous "zoom-in then zoom-out" sensation when stepping
+    // between tiers.
     let isZooming = false;
     const zoomInto = (cx, cy, callback) => {
       if (isZooming) return;
@@ -2438,50 +2450,63 @@
       const canv = document.getElementById('map-canvas');
       const content = document.getElementById('map-content');
       const w = canv.offsetWidth, h = canv.offsetHeight;
-      const targetScale = 2.6;
-      scale = targetScale;
-      tx = w * (0.5 - cx) * targetScale;
-      ty = h * (0.5 - cy) * targetScale;
+      // Phase A — old view continues zooming IN toward (cx, cy) and fades out.
+      const exitScale = 3.4;
+      scale = exitScale;
+      tx = w * (0.5 - cx) * exitScale;
+      ty = h * (0.5 - cy) * exitScale;
       content.style.transition =
-        'transform 420ms cubic-bezier(.4,0,.2,1), opacity 220ms ease 180ms';
+        'transform 400ms cubic-bezier(.4,0,.2,1), opacity 280ms ease 80ms';
       content.style.opacity = '0';
-      applyTransform(false); // CSS transition above handles the tween
+      applyTransform(false);
       setTimeout(() => {
-        callback(); // swaps view: clears map, resets transform to identity
-        // Fade the new content in from a slightly larger scale
-        scale = 1.15; tx = 0; ty = 0;
+        // Phase B — content swap, then new view arrives "from far": scale 0.45 → 1.
+        callback();
+        content.style.transition = 'none';
+        scale = 0.45; tx = 0; ty = 0;
         applyTransform(false);
-        content.style.transition = 'opacity 220ms ease, transform 320ms cubic-bezier(.4,0,.2,1)';
-        content.style.opacity = '1';
+        // Force the snap to commit before re-enabling transitions.
+        void content.offsetWidth;
+        content.style.transition =
+          'transform 380ms cubic-bezier(.4,0,.2,1), opacity 300ms ease';
         requestAnimationFrame(() => {
           scale = 1; applyTransform(false);
+          content.style.opacity = '1';
         });
         setTimeout(() => {
           isZooming = false;
           content.style.transition = '';
-        }, 360);
-      }, 440);
+        }, 420);
+      }, 420);
     };
     const zoomOut = (callback) => {
       if (isZooming) return;
       isZooming = true;
       const content = document.getElementById('map-content');
-      scale = 0.55; tx = 0; ty = 0;
+      // Phase A — old view retreats (shrinks) and fades out.
+      scale = 0.45; tx = 0; ty = 0;
       content.style.transition =
-        'transform 320ms cubic-bezier(.4,0,.2,1), opacity 220ms ease';
+        'transform 340ms cubic-bezier(.4,0,.2,1), opacity 260ms ease 60ms';
       content.style.opacity = '0';
       applyTransform(false);
       setTimeout(() => {
+        // Phase B — content swap, then new view arrives "from close": scale 1.8 → 1.
         callback();
-        scale = 1; tx = 0; ty = 0;
-        content.style.transition = 'opacity 240ms ease';
-        content.style.opacity = '1';
+        content.style.transition = 'none';
+        scale = 1.8; tx = 0; ty = 0;
         applyTransform(false);
+        void content.offsetWidth;
+        content.style.transition =
+          'transform 360ms cubic-bezier(.4,0,.2,1), opacity 280ms ease';
+        requestAnimationFrame(() => {
+          scale = 1; applyTransform(false);
+          content.style.opacity = '1';
+        });
         setTimeout(() => {
           isZooming = false;
           content.style.transition = '';
-        }, 280);
-      }, 340);
+        }, 400);
+      }, 360);
     };
 
     const orbitalPos = (orbit, t, cx = 0.5, cy = 0.5) => {
@@ -2989,6 +3014,21 @@
       renderGalaxy();
     };
 
+    // When a pinch or wheel-zoom releases beyond a tier-threshold, drill into
+    // the element the gesture was centred on (drill-in) or step back a tier
+    // (drill-out). Returns true if a drill was triggered.
+    const tryDrillAtPoint = (clientX, clientY) => {
+      const el = document.elementFromPoint(clientX, clientY);
+      const node = el && el.closest ? el.closest('.map-node') : null;
+      if (node && !node.disabled) {
+        suppressClick = true;
+        node.click();
+        setTimeout(() => { suppressClick = false; }, 120);
+        return true;
+      }
+      return false;
+    };
+
     // Pinch + pan + tap-to-not-click suppression on the map canvas
     const initPanZoom = () => {
       const canv = document.getElementById('map-canvas');
@@ -3004,6 +3044,8 @@
           const ps = [...pointers.values()];
           pinchStartDist = Math.hypot(ps[1].x - ps[0].x, ps[1].y - ps[0].y);
           pinchStartScale = scale;
+          pinchCenterX = (ps[0].x + ps[1].x) / 2;
+          pinchCenterY = (ps[0].y + ps[1].y) / 2;
         } else if (pointers.size === 1) {
           panStartX = e.clientX; panStartY = e.clientY;
           panOriginX = tx; panOriginY = ty;
@@ -3017,11 +3059,15 @@
           const ps = [...pointers.values()];
           const d = Math.hypot(ps[1].x - ps[0].x, ps[1].y - ps[0].y);
           if (pinchStartDist > 0) {
-            scale = clamp(pinchStartScale * (d / pinchStartDist), SCALE_MIN, SCALE_MAX);
+            // Allow overshoot up to PINCH_MAX / down to PINCH_MIN — release-
+            // threshold decides if it's a tier-drill or just a snap-back.
+            scale = clamp(pinchStartScale * (d / pinchStartDist), PINCH_MIN, PINCH_MAX);
             applyTransform(false);
             movedSinceDown = true;
             suppressClick = true;
           }
+          pinchCenterX = (ps[0].x + ps[1].x) / 2;
+          pinchCenterY = (ps[0].y + ps[1].y) / 2;
         } else if (pointers.size === 1) {
           const dx = e.clientX - panStartX;
           const dy = e.clientY - panStartY;
@@ -3036,6 +3082,7 @@
       }, { passive: true });
 
       const endPointer = (e) => {
+        const wasPinch = pointers.size === 2;
         pointers.delete(e.pointerId);
         if (pointers.size === 0) {
           // Briefly suppress the synthetic click that follows pointerup if user dragged
@@ -3046,9 +3093,55 @@
             suppressClick = false;
           }
         }
+        // Pinch just ended (second finger lifted) — check tier-drill thresholds.
+        if (wasPinch && !isZooming) {
+          if (scale > DRILL_IN_THRESHOLD) {
+            if (!tryDrillAtPoint(pinchCenterX, pinchCenterY)) {
+              // No drillable node at the pinch centre — snap back to the
+              // visible max so the user isn't stuck at an overshoot scale.
+              scale = SCALE_MAX;
+              applyTransform(true);
+            }
+          } else if (scale < DRILL_OUT_THRESHOLD) {
+            if (view === 'galaxy') {
+              scale = SCALE_MIN;
+              applyTransform(true);
+            } else {
+              back();
+            }
+          } else if (scale > SCALE_MAX || scale < SCALE_MIN) {
+            // Overshot but didn't reach drill threshold — settle inside bounds.
+            scale = clamp(scale, SCALE_MIN, SCALE_MAX);
+            applyTransform(true);
+          }
+        }
       };
       canv.addEventListener('pointerup', endPointer, { passive: true });
       canv.addEventListener('pointercancel', endPointer, { passive: true });
+
+      // Mouse-wheel + trackpad — same drill semantics as pinch. At the visible
+      // limit, an additional scroll-in/out crosses into a tier drill.
+      canv.addEventListener('wheel', (e) => {
+        if (isZooming) { e.preventDefault(); return; }
+        e.preventDefault();
+        // Smooth exponential — same formula on mousewheel and trackpad
+        const factor = Math.pow(1.0015, -e.deltaY);
+        const next = scale * factor;
+        // Scroll-IN past the visible max → attempt drill into element under cursor
+        if (e.deltaY < 0 && scale >= SCALE_MAX - 0.02) {
+          if (tryDrillAtPoint(e.clientX, e.clientY)) return;
+          scale = SCALE_MAX;
+          applyTransform(false);
+          return;
+        }
+        // Scroll-OUT past the visible min → drill back a tier
+        if (e.deltaY > 0 && scale <= SCALE_MIN + 0.02 && view !== 'galaxy') {
+          back();
+          return;
+        }
+        scale = clamp(next, SCALE_MIN, SCALE_MAX);
+        applyTransform(false);
+      }, { passive: false });
 
       // Capture-phase click filter — blocks clicks on map-nodes after a drag/pinch
       canv.addEventListener('click', (e) => {
