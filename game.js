@@ -2124,6 +2124,7 @@
   // resolves to the same name. PRIME LEVEL 01 is hand-named "THE MESSAGE".
   // -------------------------------------------------------------------------
   const LEVEL_NAME_WORDS = [
+    // Original 72 (kept for continuity; hashed index will still shuffle)
     'PATIENT', 'QUIET', 'BRIGHT', 'FALLEN', 'FORGOTTEN', 'BURIED', 'STILL',
     'EMPTY', 'HUMMING', 'WIDE', 'LATE', 'FROZEN', 'WARM', 'SHALLOW', 'DEEP',
     'FAINT', 'GRAVE', 'SACRED', 'BARELY', 'ENDLESS', 'WAITING', 'WAKING',
@@ -2134,6 +2135,75 @@
     'TURNING', 'COMING', 'GOING', 'HELD', 'UNTOLD', 'BORROWED', 'RETURNED',
     'SLOW', 'SUDDEN', 'HONEST', 'CARELESS', 'CAREFUL', 'SILENT', 'SPOKEN',
     'OFFERED', 'SHADED', 'CRACKED', 'HEARD', 'UNSEEN', 'WITNESSED',
+    // Verbal-adjectives (action-state)
+    'TRAILING', 'FRAYING', 'ANSWERING', 'LISTENING', 'RETURNING',
+    'RECEDING', 'LINGERING', 'FALTERING', 'UNFOLDING',
+    // un-negations
+    'WAITED', 'UNKEPT', 'UNSAID', 'UNSENT', 'UNREAD', 'UNHEARD',
+    'UNNAMED', 'UNMADE', 'UNOPENED', 'UNANSWERED',
+    // re-prefix (repetition / return)
+    'REPEATED', 'RECOVERED', 'RECALLED', 'RECEIVED', 'REMAINING',
+    'REJOINED', 'REMNANT', 'RESIDUAL',
+    // relative position
+    'DISTANT', 'ADJACENT', 'INWARD', 'OUTWARD', 'LOWER', 'UPPER', 'HITHER',
+    'ELSEWHERE', 'NEARER', 'FURTHER', 'FINAL',
+    // time (old / young / first / last)
+    'EARLY', 'ELDER', 'OLDER', 'YOUNGER', 'ANTIQUE', 'ANCIENT', 'VESTIGIAL',
+    'PRIMAL', 'FIRST', 'LAST', 'LATTER', 'FORMER', 'BEFORE', 'AFTER',
+    'BELOW', 'ABOVE', 'BENEATH', 'WITHIN', 'WITHOUT', 'BETWEEN', 'AGAIN',
+    // emotional / human
+    'ALMOST', 'ENOUGH', 'UNSURE', 'TENDER', 'TRUSTING', 'FAITHFUL', 'AFRAID',
+    'GENTLE', 'SOLEMN', 'SORRY', 'GRATEFUL', 'LONELY', 'LOVING',
+    'FAMILIAR', 'STRANGE', 'KIN', 'ORPHANED', 'ABSENT', 'PRESENT',
+    // rooms & doors
+    'OPEN', 'LOCKED', 'AJAR', 'VACANT', 'OCCUPIED',
+    // motion / placement
+    'LEFT', 'PLACED', 'FOUND', 'STORED', 'SHELVED', 'FOLDED', 'UNFOLDED',
+    'SEALED', 'UNSEALED',
+    // material condition
+    'TARNISHED', 'ACCRETED', 'WEATHERED', 'DUSTED', 'FINGERED',
+    'CREASED', 'DOGEARED', 'THREADED', 'KNOTTED', 'WOVEN', 'PATCHED',
+    'MENDED', 'SCARRED', 'SMOOTHED', 'THINNED', 'PALED', 'BLEACHED',
+    'STAINED', 'GRAINY',
+    // water / sea / colour
+    'BRINY', 'GLAUCOUS', 'MILKY', 'ASHEN', 'PEARLED', 'WAXEN',
+    'CHALKY', 'SILVERED', 'RUSTED', 'COPPERED', 'AMBERED', 'BLUEING',
+    // light
+    'DIMMED', 'LIT', 'HALF-LIT', 'BACKLIT', 'LAMPLIT', 'MOONLIT',
+    'STARLESS', 'STARRY',
+    // astronomical
+    'ORBITAL', 'SIDEREAL', 'ECLIPSED', 'TIDED', 'PHASED',
+    'WANING', 'WAXING', 'CRESCENT', 'GIBBOUS', 'UMBRAL', 'PENUMBRAL',
+    'OCCULTED', 'ALIGNED', 'MISALIGNED', 'ASCENDING', 'DESCENDING',
+    'FALLING', 'RISEN', 'RISING', 'SUNLESS',
+    // winter / sleep
+    'WINTERING', 'SLEEPING', 'WAKENING', 'DROWSING', 'DORMANT', 'ROOTED',
+    'SEEDING', 'THAWING', 'FROSTED', 'HOAR', 'SNOWBOUND',
+    'HIBERNAL', 'NORTHWARD', 'LOWERING',
+    // silence / rest
+    'MUTED', 'MUFFLED', 'HUSHED', 'PAUSED', 'RESTING', 'SUSTAINED',
+    'MEASURED', 'COUNTED', 'COUNTLESS', 'BREATHED', 'BREATHLESS',
+    // sound / vibration
+    'HUMMED', 'UNTUNED', 'ATTUNED', 'WAVERING', 'TREMBLING',
+    'FLICKERING', 'PULSING', 'BEATING', 'RINGING', 'CHIMING', 'TONAL',
+    'TONED', 'SUBTLE', 'FAINTED', 'FILTERED', 'BANDLIMITED', 'NARROW',
+    'WIDESET', 'DISTORTED', 'DOPPLERED', 'ECHOING', 'REVERBED',
+    'DELAYED', 'RELAYED', 'LOOPED', 'DROPPED', 'SKIPPED', 'MISSED',
+    // optics & reflection
+    'CROSSED', 'MIRRORED', 'INVERTED', 'REVERSED', 'SHIFTED', 'OFFSET',
+    'PHANTOM', 'GHOSTED', 'APPARENT', 'LATENT', 'HIDDEN', 'COVERED',
+    'VEILED', 'SHADOWED', 'CLOUDED', 'FOGGED', 'MISTED',
+    'OVERCAST', 'CLEARING',
+    // geometry
+    'SHALLOWING', 'DEEPENING', 'HOLLOWED', 'ROUNDED', 'WIDENING',
+    'NARROWING', 'BOUND', 'UNBOUND', 'TETHERED', 'UNTETHERED',
+    'ADRIFT', 'AFLOAT', 'STRANDED', 'MOORING', 'HARBOURED',
+    'CARRIED', 'BEARING', 'LADEN', 'LIGHTENED', 'WEIGHTED',
+    // writing / archive
+    'GRAVEN', 'ETCHED', 'IMPRINTED', 'PRESSED', 'INSCRIBED', 'ERODED',
+    'WASHED', 'SORTED', 'STACKED', 'ARCHIVED', 'INDEXED', 'MISFILED',
+    'CATALOGUED', 'NUMBERED', 'DATED', 'POSTMARKED',
+    'FORWARDED', 'KEPTSAFE', 'UNDELIVERED',
   ];
   const getLevelName = (worldId, levelIdx) => {
     if (worldId === 'prime' && levelIdx === 0) return 'THE MESSAGE';
